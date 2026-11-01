@@ -13,16 +13,33 @@ def run_pipeline(
     out_dir: str = "./outputs/inference_results",
     send2unity_dir: str = "./Send2Unity",
     styles: list[str] | None = None,
+    preview: bool = False,
+    resume: bool = False,
 ):
+    """Run every step. preview stops once the track and layers exist (no
+    tricks, Muse Image or showcase); resume starts after them, keeping a
+    previewed track instead of segmenting the photo again."""
     if not os.path.exists(image_path):
         print(f"Error: File not found at {image_path}")
         return
 
-    base_name = os.path.splitext(os.path.basename(image_path))[0]
-    
     os.makedirs(out_dir, exist_ok=True)
     os.makedirs(send2unity_dir, exist_ok=True)
-    
+
+    if resume and os.path.exists(os.path.join(send2unity_dir, "track_points.json")):
+        print("Resuming from the existing track and layers.")
+    elif not build_level(image_path, out_dir, send2unity_dir):
+        return
+    if preview:
+        print(f"\nPreview ready (track + layers) in {send2unity_dir}")
+        return
+    finish_level(image_path, out_dir, send2unity_dir, styles)
+
+
+def build_level(image_path: str, out_dir: str, send2unity_dir: str) -> bool:
+    """Steps 1-4: DA3 + SAM 3.1, Muse Spark surface, layers, track."""
+    base_name = os.path.splitext(os.path.basename(image_path))[0]
+
     print(f"\n=============================================")
     print(f"--- Step 1: Running Inference for {image_path} ---")
     print(f"=============================================")
@@ -35,7 +52,7 @@ def run_pipeline(
     
     if not os.path.exists(depth16_path) or not os.path.exists(mask_path):
         print("Error: Step 1 failed to produce expected outputs.")
-        return
+        return False
 
     print(f"\n=============================================")
     print(f"--- Step 2: Choosing Track Surface (Muse Spark) ---")
@@ -60,7 +77,7 @@ def run_pipeline(
     
     if not os.path.exists(layer_00_mask_path):
         print("Error: Step 3 failed to produce layer_00_mask.npy.")
-        return
+        return False
 
     print(f"\n=============================================")
     print(f"--- Step 4: Extracting Track ---")
@@ -79,6 +96,13 @@ def run_pipeline(
         clip_top_margin_px=80.0,
     )
     finalize_level(image_path, mask_path, objects_path, send2unity_dir, plan)
+    return True
+
+
+def finish_level(image_path: str, out_dir: str, send2unity_dir: str, styles: list[str] | None) -> None:
+    """Steps 4b-6: tricks, Muse Image art, 3D showcase."""
+    base_name = os.path.splitext(os.path.basename(image_path))[0]
+    objects_path = os.path.join(out_dir, f"{base_name}_sam31_objects.json")
 
     print(f"\n=============================================")
     print(f"--- Step 4b: Placing Tricks (Muse Spark, showcase only) ---")
@@ -120,6 +144,8 @@ if __name__ == "__main__":
     parser.add_argument("--out_dir", default="./outputs/inference_results", help="Directory for intermediate inference outputs")
     parser.add_argument("--send2unity_dir", default="./Send2Unity", help="Directory for final Unity outputs")
     parser.add_argument("--styles", default=None, help="Muse Image styles: comma-separated, 'all' or 'none' (default: $MUSE_IMAGE_STYLES or all)")
+    parser.add_argument("--preview", action="store_true", help="Stop after the track and layers (Steps 1-4)")
+    parser.add_argument("--resume", action="store_true", help="Reuse an existing track and layers; run Steps 4b-6 only")
     args = parser.parse_args()
     
     run_pipeline(
@@ -127,4 +153,6 @@ if __name__ == "__main__":
         out_dir=args.out_dir,
         send2unity_dir=args.send2unity_dir,
         styles=parse_styles(args.styles) if args.styles is not None else None,
+        preview=args.preview,
+        resume=args.resume,
     )

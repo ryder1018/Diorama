@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkateP Picker</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #06080c; --panel: #0e131c; --line: rgba(255,255,255,0.08); --text: #e9eef6; --muted: #8a94a6; --lime: #c4ff3a; --orange: #ff9a3a; --red: #ff5a5a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: "Space Grotesk", system-ui, sans-serif; padding: 0 16px 60px; }
+  .mono { font-family: "JetBrains Mono", monospace; }
+  header { position: sticky; top: 0; z-index: 5; background: rgba(6,8,12,0.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); margin: 0 -16px 22px; padding: 16px 16px 14px; }
+  .bar { max-width: 1400px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+  h1 { margin: 0; font-size: 22px; letter-spacing: -0.02em; }
+  h1 span { color: var(--lime); }
+  .count { color: var(--muted); font: 12px "JetBrains Mono", monospace; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { background: none; border: 0; color: var(--muted); font: 12px "JetBrains Mono", monospace; padding: 6px 11px; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.on { background: rgba(196,255,58,0.12); color: var(--lime); }
+  .seg button kbd { opacity: 0.5; font: inherit; margin-left: 4px; }
+  .cmd { display: flex; gap: 6px; flex: 1 1 320px; min-width: 0; }
+  .cmd input { flex: 1; min-width: 0; background: #0b0f16; border: 1px solid var(--line); border-radius: 8px; color: var(--text); font: 12px "JetBrains Mono", monospace; padding: 6px 10px; }
+  .btn { background: var(--lime); color: #0a0d12; border: 0; border-radius: 8px; font: 600 12px "JetBrains Mono", monospace; padding: 6px 12px; cursor: pointer; white-space: nowrap; }
+  .btn:disabled { opacity: 0.35; cursor: default; }
+  .legend { max-width: 1400px; margin: 8px auto 0; color: var(--muted); font: 11px "JetBrains Mono", monospace; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+  .grid { max-width: 1400px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; transition: border-color 0.15s; }
+  .card.picked { border-color: var(--lime); box-shadow: 0 0 0 1px var(--lime) inset; }
+  .frame { aspect-ratio: 4 / 3; container-type: size; background: #0a0d13; display: grid; place-items: center; cursor: zoom-in; overflow: hidden; position: relative; }
+  .pic { position: relative; aspect-ratio: var(--ar); width: min(100cqw, 100cqh * var(--ar)); }
+  .pic > img, .pic > svg, .plane > img, .plane > svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .pic.layers { transform-style: preserve-3d; transform: perspective(1800px) rotateX(8deg) rotateY(-24deg) scale(0.68); }
+  .plane { position: absolute; inset: 0; transform: translateZ(calc(var(--z) * var(--gap, 60px))); transition: transform 0.35s; border: 1px solid rgba(255,255,255,0.18); }
+  .frame:hover .pic.layers .plane { --gap: 95px; }
+  .lb .pic.layers { transform: perspective(2400px) rotateX(6deg) rotateY(-22deg) scale(0.8); }
+  .lb .pic.layers .plane { --gap: 150px; }
+  .plane.track { border-color: rgba(196,255,58,0.5); background: rgba(196,255,58,0.03); }
+  .plane .tag { position: absolute; left: 0; top: 0; transform: translateY(-100%); font: 600 10px "JetBrains Mono", monospace; letter-spacing: 0.06em; color: var(--text); background: rgba(0,0,0,0.75); padding: 2px 6px; border-radius: 4px 4px 0 0; }
+  .plane.track .tag { color: var(--lime); }
+  .failed-box { padding: 16px; color: var(--red); font: 11px/1.5 "JetBrains Mono", monospace; white-space: pre-wrap; overflow: auto; width: 100%; height: 100%; }
+  .body { padding: 12px 14px 14px; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .name { font: 600 13px "JetBrains Mono", monospace; color: var(--lime); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .chip { font: 10px "JetBrains Mono", monospace; color: var(--muted); border: 1px solid var(--line); border-radius: 99px; padding: 2px 7px; white-space: nowrap; }
+  .chip.built { color: #7fd4ff; border-color: rgba(127,212,255,0.35); text-decoration: none; }
+  .chip.warn { color: var(--orange); border-color: rgba(255,154,58,0.35); }
+  .chip.bad { color: var(--red); border-color: rgba(255,90,90,0.35); }
+  .pick { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; font: 600 12px "JetBrains Mono", monospace; padding: 4px 10px; cursor: pointer; }
+  .picked .pick { background: var(--lime); color: #0a0d12; border-color: var(--lime); }
+  .mission { font-size: 15px; font-weight: 500; margin: 8px 0 8px; line-height: 1.3; }
+  .meta { font: 11.5px/1.5 "JetBrains Mono", monospace; color: var(--text); }
+  .meta span { color: var(--muted); display: inline-block; width: 62px; }
+  .empty { max-width: 1400px; margin: 40px auto; color: var(--muted); font: 13px "JetBrains Mono", monospace; }
+
+  .lb { position: fixed; inset: 0; z-index: 20; background: var(--bg); display: none; grid-template-columns: 1fr 340px; }
+  .lb.open { display: grid; }
+  .lb .frame { aspect-ratio: auto; height: 100vh; cursor: default; background: transparent; padding: 28px; }
+  .lb .side { border-left: 1px solid var(--line); padding: 22px 20px; overflow: auto; background: var(--panel); }
+  .lb .side .mission { font-size: 18px; }
+  .lb .notes { color: var(--muted); font: 11.5px/1.55 "JetBrains Mono", monospace; margin-top: 12px; }
+  .lb .keys { color: var(--muted); font: 11px/1.8 "JetBrains Mono", monospace; margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
+  .lb .keys b { color: var(--text); font-weight: 600; }
+  .lb .nav { display: flex; gap: 8px; margin-top: 14px; }
+  .lb .nav button { flex: 1; }
+  .ghost { background: none; border: 1px solid var(--line); color: var(--text); border-radius: 8px; font: 12px "JetBrains Mono", monospace; padding: 6px 10px; cursor: pointer; }
+  @media (max-width: 760px) {
+    .lb { grid-template-columns: 1fr; grid-template-rows: 60vh auto; }
+    .lb .frame { height: 60vh; padding: 12px; }
+    .lb .side { border-left: 0; border-top: 1px solid var(--line); }
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>Skate<span>P</span> picker</h1>
+    <span class="count mono" id="count"></span>
+    <div class="seg" id="filter">
+      <button data-f="all" class="on">all</button><button data-f="picked">picked</button><button data-f="unbuilt">not built</button><button data-f="failed">failed</button>
+    </div>
+    <div class="seg" id="view">
+      <button data-v="track" class="on">track<kbd>1</kbd></button><button data-v="layers">layers<kbd>2</kbd></button><button data-v="photo">photo<kbd>3</kbd></button>
+    </div>
+    <div class="cmd">
+      <input id="cmd" readonly placeholder="pick photos to get the build command">
+      <button class="btn" id="copy" disabled>copy</button>
+    </div>
+  </div>
+  <div class="legend">
+    <span><i class="sw" style="background:var(--lime)"></i>track line</span>
+    <span><i class="sw" style="background:var(--orange)"></i>skater passes behind</span>
+    <span><i class="sw" style="background:rgba(120,220,90,0.6)"></i>rideable ground</span>
+    <span>layers: near → track → mid → far · click a photo to enlarge</span>
+  </div>
+</header>
+<main class="grid" id="grid"></main>
+<p class="empty" id="empty" hidden></p>
+
+<div class="lb" id="lb">
+  <div class="frame" id="lbFrame"></div>
+  <aside class="side" id="lbSide"></aside>
+</div>
+
+<script>
+const ENTRIES = __DATA__;
+const STAMP = "__STAMP__";
+const STORE = "skatep.picks";
+
+const load = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
+const save = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+const picks = new Set(load(STORE, []).filter((n) => ENTRIES.some((e) => e.name === n)));
+let filter = "all";
+let view = load("skatep.view", "track");
+let lbIndex = -1;
+
+const src = (e, file) => `${encodeURIComponent(e.name)}/preview/${file}?v=${STAMP}`;
+
+function trackSvg(e) {
+  const vh = (1000 * e.h) / e.w;
+  const pt = ([x, y]) => `${(x * 1000).toFixed(1)},${(y * vh).toFixed(1)}`;
+  const line = e.points.map(pt).join(" ");
+  const behind = e.occluded.map(([a, b]) => `<polyline points="${e.points.slice(a, b + 1).map(pt).join(" ")}" stroke="#ff9a3a" stroke-width="9" stroke-dasharray="14 10" fill="none" stroke-linecap="round"/>`).join("");
+  const [sx, sy] = pt(e.points[0] || [0, 0]).split(",");
+  return `<svg viewBox="0 0 1000 ${vh.toFixed(1)}" preserveAspectRatio="none">
+    <polyline points="${line}" stroke="#000" stroke-opacity="0.55" stroke-width="13" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+    <polyline points="${line}" stroke="#c4ff3a" stroke-width="7" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+    ${behind}
+    <circle cx="${sx}" cy="${sy}" r="11" fill="#c4ff3a" stroke="#000" stroke-width="3"/>
+  </svg>`;
+}
+
+function picture(e, mode) {
+  if (e.status !== "ok") return `<div class="failed-box">✗ ${esc(e.name)}\n\n${esc(e.log)}</div>`;
+  const ar = `style="--ar:${e.w}/${e.h}"`;
+  if (mode === "photo") return `<div class="pic" ${ar}><img src="${src(e, "photo.webp")}" alt=""></div>`;
+  if (mode === "track") {
+    return `<div class="pic" ${ar}><img src="${src(e, "photo.webp")}" alt=""><img src="${src(e, "track.webp")}" alt="">${trackSvg(e)}</div>`;
+  }
+  return `<div class="pic layers" ${ar}>
+    <div class="plane" style="--z:-1"><img src="${src(e, "layer_3.webp")}" alt=""><div class="tag">FAR</div></div>
+    <div class="plane" style="--z:0"><img src="${src(e, "layer_2.webp")}" alt=""><div class="tag">MID</div></div>
+    <div class="plane track" style="--z:1"><img src="${src(e, "track.webp")}" alt="" style="opacity:0.6">${trackSvg(e)}<div class="tag">TRACK</div></div>
+    <div class="plane" style="--z:2"><img src="${src(e, "layer_1.webp")}" alt=""><div class="tag">NEAR</div></div>
+  </div>`;
+}
+
+function chips(e) {
+  const out = [];
+  if (e.built) out.push(`<a class="chip built" href="${encodeURIComponent(e.name)}/showcase.html" title="open the full 3D showcase">built ↗</a>`);
+  if (e.status !== "ok") out.push(`<span class="chip bad">failed</span>`);
+  else if (!e.muse) out.push(`<span class="chip warn" title="Muse Spark surface choice failed; geometric fallback">geometric</span>`);
+  else if (e.attempts > 1) out.push(`<span class="chip warn" title="Muse Spark needed repairs">try ${e.attempts}</span>`);
+  return out.join("");
+}
+
+function details(e) {
+  if (e.status !== "ok") return "";
+  return `<div class="mission">${esc(e.mission)}</div>
+    <div class="meta"><span>surface</span>${esc(e.surfaces.join(", ") || "geometric")}</div>
+    <div class="meta"><span>behind</span>${esc(e.behind.join(", ") || "—")}</div>
+    <div class="meta"><span>near</span>${esc((e.layers[0] || []).join(", ") || "—")}</div>`;
+}
+
+function visible() {
+  return ENTRIES.filter((e) =>
+    filter === "picked" ? picks.has(e.name) :
+    filter === "unbuilt" ? !e.built && e.status === "ok" :
+    filter === "failed" ? e.status !== "ok" : true);
+}
+
+function renderGrid() {
+  const list = visible();
+  document.getElementById("grid").innerHTML = list.map((e) => `
+    <article class="card${picks.has(e.name) ? " picked" : ""}" data-name="${esc(e.name)}">
+      <div class="frame">${picture(e, view)}</div>
+      <div class="body">
+        <div class="row"><div class="name">${esc(e.name)}</div>${chips(e)}${e.status === "ok" ? `<button class="pick">${picks.has(e.name) ? "★ picked" : "☆ pick"}</button>` : ""}</div>
+        ${details(e)}
+      </div>
+    </article>`).join("");
+  const empty = document.getElementById("empty");
+  empty.hidden = list.length > 0;
+  empty.textContent = ENTRIES.length ? "Nothing in this filter." : "No tracks yet. Drop photos into photos/ and run ./run_photos.sh --preview";
+  renderBar();
+}
+
+function renderBar() {
+  const ok = ENTRIES.filter((e) => e.status === "ok").length;
+  document.getElementById("count").textContent = `${ok} track${ok === 1 ? "" : "s"} · ${ENTRIES.length - ok} failed · ${picks.size} picked`;
+  const names = ENTRIES.filter((e) => picks.has(e.name)).map((e) => e.name);
+  document.getElementById("cmd").value = names.length ? `./run_photos.sh ${names.join(" ")}` : "";
+  document.getElementById("copy").disabled = !names.length;
+  document.querySelectorAll("#filter button").forEach((b) => b.classList.toggle("on", b.dataset.f === filter));
+  document.querySelectorAll("#view button").forEach((b) => b.classList.toggle("on", b.dataset.v === view));
+}
+
+function togglePick(name) {
+  picks.has(name) ? picks.delete(name) : picks.add(name);
+  save(STORE, [...picks]);
+  const card = document.querySelector(`.card[data-name="${CSS.escape(name)}"]`);
+  if (card) {
+    card.classList.toggle("picked", picks.has(name));
+    const btn = card.querySelector(".pick");
+    if (btn) btn.textContent = picks.has(name) ? "★ picked" : "☆ pick";
+  }
+  renderBar();
+  if (lbIndex >= 0) renderLightbox();
+}
+
+function setView(v) {
+  view = v;
+  save("skatep.view", v);
+  renderGrid();
+  if (lbIndex >= 0) renderLightbox();
+}
+
+function renderLightbox() {
+  const list = visible();
+  const e = list[lbIndex];
+  if (!e) return closeLightbox();
+  document.getElementById("lbFrame").innerHTML = picture(e, view);
+  const picked = picks.has(e.name);
+  document.getElementById("lbSide").innerHTML = `
+    <div class="row"><div class="name">${esc(e.name)}</div>${chips(e)}</div>
+    <div class="count mono" style="margin-top:4px">${lbIndex + 1} / ${list.length}</div>
+    ${details(e)}
+    ${e.status === "ok" ? `<div class="meta"><span>mid</span>${esc((e.layers[1] || []).join(", ") || "—")}</div>
+    <div class="meta"><span>far</span>${esc((e.layers[2] || []).join(", ") || "—")}</div>
+    <div class="notes">Muse Spark: ${esc(e.notes || "—")}</div>` : ""}
+    <div class="nav">
+      <button class="ghost" data-go="-1">← prev</button>
+      ${e.status === "ok" ? `<button class="${picked ? "btn" : "ghost"}" data-pick>${picked ? "★ picked" : "☆ pick"}</button>` : ""}
+      <button class="ghost" data-go="1">next →</button>
+    </div>
+    <div class="seg" style="margin-top:12px">
+      ${["track", "layers", "photo"].map((v, i) => `<button data-v="${v}" class="${v === view ? "on" : ""}">${v}<kbd>${i + 1}</kbd></button>`).join("")}
+    </div>
+    <div class="keys"><b>← →</b> browse · <b>P</b> / <b>space</b> pick · <b>1 2 3</b> view · <b>esc</b> close</div>`;
+}
+
+function openLightbox(name) {
+  lbIndex = visible().findIndex((e) => e.name === name);
+  document.getElementById("lb").classList.add("open");
+  renderLightbox();
+}
+
+function closeLightbox() {
+  lbIndex = -1;
+  document.getElementById("lb").classList.remove("open");
+}
+
+function go(step) {
+  const n = visible().length;
+  if (!n) return closeLightbox();
+  lbIndex = (lbIndex + step + n) % n;
+  renderLightbox();
+}
+
+document.getElementById("grid").addEventListener("click", (ev) => {
+  const card = ev.target.closest(".card");
+  if (!card || ev.target.closest("a")) return;
+  if (ev.target.closest(".pick")) togglePick(card.dataset.name);
+  else if (ev.target.closest(".frame")) openLightbox(card.dataset.name);
+});
+document.getElementById("filter").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button");
+  if (b) { filter = b.dataset.f; renderGrid(); }
+});
+document.getElementById("view").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button");
+  if (b) setView(b.dataset.v);
+});
+document.getElementById("lbSide").addEventListener("click", (ev) => {
+  const t = ev.target.closest("button");
+  if (!t) return;
+  if (t.dataset.go) go(Number(t.dataset.go));
+  else if (t.hasAttribute("data-pick")) togglePick(visible()[lbIndex].name);
+  else if (t.dataset.v) setView(t.dataset.v);
+});
+document.getElementById("lbFrame").addEventListener("click", (ev) => { if (ev.target.id === "lbFrame") closeLightbox(); });
+document.getElementById("copy").addEventListener("click", async () => {
+  const input = document.getElementById("cmd");
+  input.select();
+  try { await navigator.clipboard.writeText(input.value); } catch { document.execCommand("copy"); }
+  const btn = document.getElementById("copy");
+  btn.textContent = "copied";
+  setTimeout(() => (btn.textContent = "copy"), 1200);
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.target.tagName === "INPUT" || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  if (ev.key === "1" || ev.key === "2" || ev.key === "3") setView(["track", "layers", "photo"][Number(ev.key) - 1]);
+  if (lbIndex < 0) return;
+  if (ev.key === "Escape") closeLightbox();
+  else if (ev.key === "ArrowRight") go(1);
+  else if (ev.key === "ArrowLeft") go(-1);
+  else if (ev.key === "p" || ev.key === "P" || ev.key === " ") {
+    ev.preventDefault();
+    const e = visible()[lbIndex];
+    if (e && e.status === "ok") togglePick(e.name);
+  }
+});
+
+renderGrid();
+</script>
+</body>
+</html>

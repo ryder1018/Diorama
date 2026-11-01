@@ -116,6 +116,9 @@
   .controls button { background: none; border: 1px solid var(--line); color: var(--text); border-radius: 8px; width: 34px; height: 30px; cursor: pointer; font-size: 13px; }
   .controls input { flex: 1; accent-color: var(--lime); }
   .controls .clock { font: 12px var(--mono); color: var(--muted); min-width: 92px; text-align: right; }
+  .controls button.off { color: var(--muted); border-style: dashed; }
+  .toast { left: 50%; top: 84px; transform: translateX(-50%); font: 12px var(--mono); color: var(--text); background: rgba(10, 13, 18, 0.85); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; opacity: 0; transition: opacity 0.25s; pointer-events: none; white-space: nowrap; }
+  .toast.on { opacity: 1; }
   .hint { right: 32px; bottom: 30px; font: 11px var(--mono); color: var(--muted); text-align: right; line-height: 1.6; }
   body.capture .controls, body.capture .hint { display: none; }
   body.capture .caption { bottom: 48px; }
@@ -213,10 +216,12 @@
 <div class="ui panel controls">
   <button id="play" title="Play / pause (space)">❚❚</button>
   <button id="sound" title="Sound on (M)">🔇</button>
+  <button id="fade" title="Foreground fades while the skater is behind it (F)">◐</button>
   <input id="scrub" type="range" min="0" max="1000" value="0">
   <div class="clock" id="clock">0.0 / 0.0s</div>
 </div>
 <div class="ui hint" id="hint"></div>
+<div class="ui toast" id="toast"></div>
 <div id="error"></div>
 
 <script id="data" type="application/json">__SHOWCASE_DATA__</script>
@@ -249,6 +254,8 @@ const params = new URLSearchParams(location.search);
 const CAPTURE = params.has("capture");
 if (CAPTURE) document.body.classList.add("capture");
 if (params.get("ui") === "0") document.body.classList.add("hide-ui");
+// F / ?fade=0: keep the foreground opaque, so the skater is fully hidden behind real objects.
+let foregroundFade = params.get("fade") !== "0";
 
 // ---------------------------------------------------------------- helpers
 const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
@@ -988,7 +995,7 @@ function buildUI() {
 
   if (BACKGROUND_FILL) document.getElementById("bg-legend").textContent = "Background · Muse Image fills what is hidden";
 
-  document.getElementById("hint").innerHTML = `space play · R restart · 1–${STAGES.length} jump to step${STYLES.length > 1 ? " · S next art style" : ""}<br>drag to orbit · C cinematic camera · H hide UI · M sound`;
+  document.getElementById("hint").innerHTML = `space play · R restart · 1–${STAGES.length} jump to step${STYLES.length > 1 ? " · S next art style" : ""}<br>drag to orbit · C cinematic camera · F foreground fade · H hide UI · M sound`;
 
   if (STYLES.length > 1) {
     const bar = document.getElementById("styles");
@@ -1188,7 +1195,7 @@ function applyState(t) {
   // foreground object, the foreground fades to 35% so the player stays readable.
   const rideBoardU = rideU(t);
   let behind = 0;
-  if (t >= S.ride.t0 + 1.4) {
+  if (foregroundFade && t >= S.ride.t0 + 1.4) {
     for (const o of occluders) {
       const [x0, x1] = o.x_range;
       const edge = Math.max(0.01, (x1 - x0) * 0.25);
@@ -1857,6 +1864,19 @@ function tick(now) {
   requestAnimationFrame(tick);
 }
 
+let toastTimer = 0;
+function toggleForegroundFade() {
+  foregroundFade = !foregroundFade;
+  const el = document.getElementById("fade");
+  el.classList.toggle("off", !foregroundFade);
+  el.title = foregroundFade ? "Foreground fades while the skater is behind it (F)" : "Foreground stays solid: the skater is fully hidden (F)";
+  const toast = document.getElementById("toast");
+  toast.textContent = foregroundFade ? "Foreground fade on: see the skater through objects" : "Foreground fade off: real objects fully hide the skater";
+  toast.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove("on"), 1800);
+}
+
 function setPlayIcon() { document.getElementById("play").textContent = playing ? "❚❚" : "▶"; }
 
 function onResize() {
@@ -1874,6 +1894,8 @@ const scrub = document.getElementById("scrub");
 scrub.addEventListener("input", () => { scrubbing = true; time = (scrub.value / 1000) * DURATION; });
 scrub.addEventListener("change", () => { scrubbing = false; });
 document.getElementById("sound").onclick = toggleSound;
+document.getElementById("fade").onclick = toggleForegroundFade;
+if (!foregroundFade) document.getElementById("fade").classList.add("off");
 window.addEventListener("pointerdown", unlockSound);
 window.addEventListener("keydown", unlockSound);
 window.addEventListener("keydown", (e) => {
@@ -1883,6 +1905,7 @@ window.addEventListener("keydown", (e) => {
   else if (e.key === "h" || e.key === "H") document.body.classList.toggle("hide-ui");
   else if (e.key === "c" || e.key === "C") manualCamera = false;
   else if (e.key === "m" || e.key === "M") toggleSound();
+  else if (e.key === "f" || e.key === "F") toggleForegroundFade();
   else if (e.key >= "1" && e.key <= String(STAGES.length)) { time = STAGES[Number(e.key) - 1].t0; manualCamera = false; }
 });
 

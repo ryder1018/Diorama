@@ -6,10 +6,12 @@ The page's synthesized soundtrack (the same one it plays live) is rendered
 offline in the browser and muxed in as AAC; --no-audio leaves it out.
 
 Usage:
-    python scripts/render_showcase.py <showcase.html> [--out showcase.mp4] [--fps 30] [--size 1920x1080] [--style comic] [--no-audio]
+    python scripts/render_showcase.py <showcase.html> [--out showcase.mp4] [--fps 30] [--size 1920x1080] [--style comic] [--no-audio] [--no-fade]
 
 --style picks the Muse Image art style the level settles on after the restyle
 step (default: the first style in styles.json; 'original' keeps the photo).
+--no-fade keeps the foreground opaque in the ride, so the skater is fully
+hidden behind real objects (the page's F key).
 
 Requires: pip install playwright && playwright install chromium; ffmpeg on PATH.
 """
@@ -34,6 +36,7 @@ def render(
     end: float | None = None,
     style: str | None = None,
     audio: bool = True,
+    fade: bool = True,
 ) -> str:
     from playwright.sync_api import sync_playwright
 
@@ -42,7 +45,7 @@ def render(
     if ffmpeg is None:
         raise RuntimeError("ffmpeg is not on PATH.")
 
-    url = Path(html_path).resolve().as_uri() + "?capture=1" + (f"&style={style}" if style else "")
+    url = Path(html_path).resolve().as_uri() + "?capture=1" + (f"&style={style}" if style else "") + ("" if fade else "&fade=0")
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
         page = browser.new_page(viewport={"width": width, "height": height}, device_scale_factor=1)
@@ -111,10 +114,11 @@ def main():
     parser.add_argument("--end", type=float, default=None, help="End time in seconds")
     parser.add_argument("--style", default=None, help="Art style to settle on (a styles.json name or 'original')")
     parser.add_argument("--no-audio", action="store_true", help="Leave the synthesized soundtrack out")
+    parser.add_argument("--no-fade", action="store_true", help="Keep the foreground opaque while the skater is behind it")
     args = parser.parse_args()
     out = args.out or os.path.splitext(args.html_path)[0] + ".mp4"
     try:
-        render(args.html_path, out, args.fps, args.size, args.start, args.end, args.style, not args.no_audio)
+        render(args.html_path, out, args.fps, args.size, args.start, args.end, args.style, not args.no_audio, not args.no_fade)
     except Exception as exc:
         print(f"Render failed: {exc}", file=sys.stderr)
         sys.exit(1)
