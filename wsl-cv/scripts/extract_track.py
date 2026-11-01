@@ -201,7 +201,7 @@ if __name__ == '__main__':
     out_json = './Send2Unity/track_points.json'
     
     # 指向真實的原圖路徑，用來提取平均色彩
-    original_img_path = './assets/examples/SOH/street2d.jpg'
+    original_img_path = './assets/pictures/street2d.jpg'
     img_name = os.path.basename(original_img_path)
     
     extract_smooth_track(npy_file, out_json, rgb_image_path=original_img_path, source_img_name=img_name)

@@ -469,7 +469,7 @@ def process_cut_img(
 if __name__ == "__main__":
     base_name = "street2d"
 
-    rgb_img_path = f"./assets/examples/SOH/{base_name}.jpg"
+    rgb_img_path = f"./assets/pictures/{base_name}.jpg"
     depth16_path_arg = f"./outputs/inference_results/{base_name}_depth_16bit.png"
     mask_npy_path = f"./outputs/inference_results/{base_name}_depth_mask.npy"
 

@@ -14,8 +14,7 @@ checkpoints/
 weights/
 models/
 .ipynb_checkpoints/
-Send2Unity/*.png
-Send2Unity/*.npy
+wsl-cv/Send2Unity/
 .DS_Store
 .vscode/
 _legacy/
@@ -28,6 +27,8 @@ unity_client/MobileCameraCapture_old.cs
 # Generated showcase runs: keep only the self-contained pages.
 wsl-cv/showcase/*/*
 !wsl-cv/showcase/*/showcase.html
+# Photo picker page (links local preview images).
+wsl-cv/showcase/preview.html
 # Test photos dropped in for run_photos.sh (may show people; keep them local).
 wsl-cv/photos/*
 !wsl-cv/photos/.gitkeep

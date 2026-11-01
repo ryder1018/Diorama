@@ -29,12 +29,14 @@ Outputs and temporary job directories (`_jobs/`) are managed automatically durin
 
 ### Running Scripts Manually
 ```bash
-uv run python scripts/pipeline.py ./assets/pictures/whisky.jpg
+uv run python scripts/pipeline.py ./assets/pictures/cup.jpg
 ```
 Intermediate outputs will be saved to `outputs/` and `Send2Unity/`.
 
 ### Trying Photos
 Drop photos into `wsl-cv/photos/` and run `./run_photos.sh` (inside the project env). Each new photo gets `showcase/<name>/showcase.html`, and `showcase/index.html` links them all; already-built photos are skipped (`--force` rebuilds, `--video` also renders MP4s). For a single photo anywhere on disk: `./try_photo.sh <photo> [name] [--video]`.
+
+To pick photos quickly, `./run_photos.sh --preview` runs only DA3, SAM 3.1 and the Muse Spark track (about a minute per photo; no tricks, Muse Image or 3D page) and opens `showcase/preview.html`: each photo with its track line, rideable ground and the objects the skater passes behind, or its near / track / mid / far layers in an exploded 3D stack. Mark photos with ☆ pick (← → browse, P picks, 1 2 3 switch views in the enlarged view), copy the generated `./run_photos.sh <names>` command, and run it: picked photos are finished from their previewed track (`pipeline.py --resume`), so the showcase rides the line you chose. Names given to `run_photos.sh` limit any mode to those photos.
 
 `./run_photos.sh --restyle` adds Muse Image art styles to every showcase that is already built, reusing its DA3 / SAM 3.1 / track outputs (only the Muse Image calls run; cached styles are kept unless `--force`).
 
@@ -69,7 +71,7 @@ python scripts/feature_designer.py <image> <inference_dir> <send2unity_dir>
 ```
 
 ### 3D Pipeline Showcase
-Every `scripts/pipeline.py` run also writes `<send2unity_dir>/showcase.html`: a self-contained three.js page that replays the run (photo → DA3 depth relief → Muse Spark concepts → SAM 3.1 objects → 2.5D layers → Muse Image restyles → Muse Spark design/verify loop → Muse Spark tricks → ride). The Tricks step appears only when `features.json` exists and Muse Spark was asked: each rejected set draws in red with its violations and fades, then the verified jumps (cyan arcs, as high as the mask check measured) and grinds (orange) draw; in the ride the skater pops over the arcs and throws sparks on the grinds. Open it in a browser (it loads three.js from a CDN). Controls: space play/pause, R restart, 1–8 jump to a step, drag to orbit, C back to the cinematic camera, H hide the UI for screen recording, M sound on/off.
+Every `scripts/pipeline.py` run also writes `<send2unity_dir>/showcase.html`: a self-contained three.js page that replays the run (photo → DA3 depth relief → Muse Spark concepts → SAM 3.1 objects → 2.5D layers → Muse Image restyles → Muse Spark design/verify loop → Muse Spark tricks → ride). The Tricks step appears only when `features.json` exists and Muse Spark was asked: each rejected set draws in red with its violations and fades, then the verified jumps (cyan arcs, as high as the mask check measured) and grinds (orange) draw; in the ride the skater pops over the arcs and throws sparks on the grinds. Open it in a browser (it loads three.js from a CDN). Controls: space play/pause, R restart, 1–8 jump to a step, drag to orbit, C back to the cinematic camera, H hide the UI for screen recording, M sound on/off, F foreground fade on/off (by default the foreground fades to 35% while the skater is behind it, like Unity's ForegroundOcclusionFader; off keeps it opaque so real objects fully hide the skater; `?fade=0` starts with it off).
 
 **Skater:** in the Ride step a rider stands on the board: a sideways stance facing the camera, built from capsules and posed each frame with 2-bone IK (two kick pushes at the start, knee bob and arm sway while cruising, a crouch-pop over jump spans), with a lime outline so it reads on any art style. It is drawn between the gameplay and foreground layers like the board, so foreground objects hide it.
 
@@ -80,7 +82,7 @@ Every `scripts/pipeline.py` run also writes `<send2unity_dir>/showcase.html`: a 
 To render the same sequence to MP4 locally (headless Chromium + ffmpeg, ~1 s per 1080p frame). The MP4 gets the same soundtrack as an AAC track; `--no-audio` leaves it out:
 ```bash
 pip install playwright && python -m playwright install chromium   # once
-python scripts/render_showcase.py <send2unity_dir>/showcase.html --out showcase.mp4 [--style cyberpunk] [--no-audio]
+python scripts/render_showcase.py <send2unity_dir>/showcase.html --out showcase.mp4 [--style cyberpunk] [--no-audio] [--no-fade]
 ```
 
 ## 2. Repository Map
@@ -97,8 +99,9 @@ python scripts/render_showcase.py <send2unity_dir>/showcase.html --out showcase.
 *   `scripts/muse_image.py`: Muse Image restyling. Repaints the photo per art style, registers it back onto the photo and scores the fit, then re-cuts the three layers with the original alphas (`styles/`, `styles.json`).
 *   `scripts/showcase.py` + `scripts/showcase_template.html`: Builds the self-contained 3D pipeline showcase page from one run's outputs.
 *   `scripts/render_showcase.py`: Renders the showcase page to MP4 frame by frame (Playwright + ffmpeg).
+*   `scripts/preview_index.py` + `scripts/preview_template.html`: Builds `showcase/preview.html`, the photo picker (track and layers per run, from small WebP copies in `showcase/<name>/preview/`).
 *   `scripts/depth_adapter.py`: Wrapper and integration point for the DA3 model.
-*   `models/depth_anything_3/`: Vendor/model code (Do not modify).
+*   `depth_anything_3` (not in this repo): Depth Anything 3, installed into the env as a package.
 *   `Send2Unity/`: Generated Unity-facing outputs for manual runs.
 *   `outputs/`: Generated intermediate outputs.
 
@@ -114,7 +117,7 @@ python scripts/render_showcase.py <send2unity_dir>/showcase.html --out showcase.
 
 ### Known Fragile Points
 *   **Job Orchestration**: `scripts/infer.py` uses isolated job directories, symlinks, and wrapper scripts to override hardcoded paths in path-sensitive legacy scripts. This is sensitive to script changes.
-*   **DA3 Vendor Dependency**: `models/depth_anything_3/` must remain untouched. Any API changes there require updates to `scripts/depth_adapter.py`.
+*   **DA3 Dependency**: Depth Anything 3 is an installed package; any API changes there require updates to `scripts/depth_adapter.py`.
 *   **SAM 3.1 Runtime Dependency**: SAM 3.1 is called at `https://api.meta.ai/v1/responses` with model `sam-3.1`, so the server needs network access and `MODEL_API_KEY`. Setting `SAM31_SKATEABLE_PROMPTS` / `SAM31_SCENERY_PROMPTS` (comma-separated) skips the Muse Spark concept proposal and uses those lists.
 *   **Generated Folders**: Manual runs rely on `outputs/` and `Send2Unity/` folders being created correctly.
 

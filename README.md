@@ -17,8 +17,8 @@ This repository contains multiple interconnected environments (C# & Python) runn
 ### `wsl-cv/` (WSL / Linux - Python)
 **Role:** The core Computer Vision backend. 
 - **Tech Stack:** Python 3.10+, PyTorch, FastAPI, `uv` for dependency management.
-- **Key Flow:** Exposes a `POST /infer` endpoint. Uses `Depth Anything 3` (in `models/depth_anything_3`) to extract depth, uses SAM 3.1 (Meta Model API) text prompts to find skateable objects, then runs layer export and track extraction scripts (`scripts/run_inference_sobal.py`, `scripts/cut_img.py`, `scripts/extract_track.py`) in isolated subprocess sandbox directories (`_jobs/`).
-- **Important:** Do NOT modify `models/depth_anything_3` as it is vendor code. Look at `wsl-cv/README.md` for specific CV details.
+- **Key Flow:** Exposes a `POST /infer` endpoint. Uses `Depth Anything 3` (the `depth_anything_3` package installed in the env) to extract depth, uses SAM 3.1 (Meta Model API) text prompts to find skateable objects and Muse Spark to pick the riding surface, then runs layer export and track extraction (`scripts/run_inference_depth_sam31.py`, `scripts/cut_img.py`, `scripts/extract_track.py`) in isolated job directories (`_jobs/`).
+- **Important:** Depth Anything 3 is third-party code installed into the env, not vendored here; `scripts/depth_adapter.py` is the only place that calls it. Look at `wsl-cv/README.md` for specific CV details.
 
 ### `win-server/` (Windows - Python)
 **Role:** The Gateway Server.

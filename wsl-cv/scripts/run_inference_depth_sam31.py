@@ -134,7 +134,7 @@ def run_inference(
     print(f"--- Done. Results saved to {out_dir} ---")
 
 def main():
-    IMAGE_PATH = "./assets/pictures/whisky.jpg"
+    IMAGE_PATH = "./assets/pictures/cup.jpg"
     OUTDIR     = "./outputs/inference_results"
     MODEL_NAME = "depth-anything/da3-small"
     INPUT_SIZE = 768
