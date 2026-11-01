@@ -8,6 +8,8 @@
 #                              # showcase, reusing its DA3/SAM/track outputs;
 #                              # cached styles are kept unless --force is given.
 #                              # MUSE_IMAGE_STYLES=comic,snow picks styles.
+#   ./run_photos.sh --tricks   # (re)place Muse Spark jumps/grinds (features.json) on every built
+#                              # showcase, reusing its track, and rebuild the page.
 #
 # Photos stay where they are; each one gets showcase/<name>/ (name = file name
 # reduced to [A-Za-z0-9_-]) and showcase/index.html links them all.
@@ -21,11 +23,13 @@ export PYTHONNOUSERSITE=1
 FORCE=0
 VIDEO_ARG=""
 RESTYLE=0
+TRICKS=0
 for arg in "$@"; do
   case "$arg" in
     --force) FORCE=1 ;;
     --video) VIDEO_ARG="--video" ;;
     --restyle) RESTYLE=1 ;;
+    --tricks) TRICKS=1 ;;
     *) echo "unknown option: $arg" >&2; exit 1 ;;
   esac
 done
@@ -34,6 +38,33 @@ mkdir -p "$PHOTOS"
 done_count=0
 failed=()
 shopt -s nullglob nocaseglob
+
+if [ "$TRICKS" -eq 1 ]; then
+  if [ -z "${MODEL_API_KEY:-}" ] && [ -f "$HERE/../.env" ]; then
+    set -a; . "$HERE/../.env"; set +a
+  fi
+  for dir in "$HERE"/showcase/*/; do
+    name="$(basename "$dir")"
+    photo=""
+    for candidate in "$dir$name".{jpg,jpeg,png,webp,bmp}; do photo="$candidate"; break; done
+    if [ -z "$photo" ] || [ ! -d "${dir}outputs" ] || [ ! -f "${dir}track_points.json" ]; then
+      echo "skip  $name (no pipeline outputs)"
+      continue
+    fi
+    echo "trick $name"
+    if (cd "$HERE" && "$PYTHON" scripts/feature_designer.py "$photo" "${dir}outputs" "$dir" \
+        && "$PYTHON" scripts/showcase.py "$photo" "${dir}outputs" "$dir") > "${dir}tricks.log" 2>&1; then
+      grep -E "✔|✘|^    - " "${dir}tricks.log" | sed 's/^ */      /'
+      done_count=$((done_count + 1))
+    else
+      echo "      FAILED, see showcase/$name/tricks.log"
+      failed+=("$name")
+    fi
+  done
+  "$PYTHON" "$HERE/scripts/showcase_index.py" "$HERE/showcase"
+  echo "Placed tricks on $done_count showcase(s)${failed:+, failed: ${failed[*]}}."
+  exit 0
+fi
 
 if [ "$RESTYLE" -eq 1 ]; then
   if [ -z "${MODEL_API_KEY:-}" ] && [ -f "$HERE/../.env" ]; then

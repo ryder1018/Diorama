@@ -4,6 +4,7 @@ from run_inference_depth_sam31 import run_inference
 from cut_img import process_cut_img
 from extract_track import extract_smooth_track
 from level_designer import finalize_level, plan_track, repair_track_occlusions, surfaces_path_for
+from feature_designer import design_tricks
 from muse_image import front_objects, load_setting, parse_styles, styles_from_env, stylize_run
 from showcase import build_showcase
 
@@ -78,6 +79,17 @@ def run_pipeline(
         clip_top_margin_px=80.0,
     )
     finalize_level(image_path, mask_path, objects_path, send2unity_dir, plan)
+
+    print(f"\n=============================================")
+    print(f"--- Step 4b: Placing Tricks (Muse Spark, showcase only) ---")
+    print(f"=============================================")
+    features_path = os.path.join(send2unity_dir, "features.json")
+    if os.path.exists(features_path):
+        os.remove(features_path)
+    try:
+        design_tricks(image_path, out_dir, send2unity_dir)
+    except Exception as exc:
+        print(f"Muse Spark trick design failed ({exc}); the showcase rides without tricks.")
 
     styles = styles_from_env() if styles is None else styles
     print(f"\n=============================================")

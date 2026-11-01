@@ -3,7 +3,8 @@
 The page replays the whole photo -> level pipeline in a three.js scene:
 photo -> DA3 depth relief -> Muse Spark concepts -> SAM 3.1 objects ->
 depth-sorted 2.5D layers -> Muse Image restyles -> Muse Spark surface choice +
-track -> ride, passing behind the objects that stand in front of the track.
+track -> Muse Spark tricks (features.json, when present) -> ride, passing behind
+the objects that stand in front of the track.
 Every Muse Image style in styles.json is embedded, and the page has a style
 switcher that swaps the photo, relief and all three layers.
 
@@ -176,6 +177,8 @@ def build_showcase(image_path: str, inference_dir: str, send2unity_dir: str, out
     objects = scene.get("objects", [])
     track = _load_json(os.path.join(send2unity_dir, "track_points.json")) or {}
     attempts = _load_json(os.path.join(send2unity_dir, "level_design_log.json")) or []
+    # Jumps and grinds from feature_designer.py (showcase only; absent on older runs).
+    tricks = _load_json(os.path.join(send2unity_dir, "features.json"))
 
     depth_color, depth_disp = _depth_assets(depth16, (width, height))
     sam_overlay, anchors = _sam_assets(image_bgr, labels, objects)
@@ -183,10 +186,11 @@ def build_showcase(image_path: str, inference_dir: str, send2unity_dir: str, out
     meta = track.get("level") or {}
     level = {
         "generator": meta.get("generator", "rule-based"),
-        "mission": meta.get("mission", "Ride the line"),
+        "mission": (tricks or {}).get("mission") or meta.get("mission", "Ride the line"),
         "design_notes": meta.get("design_notes", ""),
         "surfaces": meta.get("surfaces", []),
         "occluders": meta.get("occluders", []),
+        "features": (tricks or {}).get("features", []),
         "path": track.get("points", []),
     }
 
@@ -224,6 +228,21 @@ def build_showcase(image_path: str, inference_dir: str, send2unity_dir: str, out
             }
             for a in attempts
         ],
+        "tricks": {
+            "generator": tricks["generator"],
+            "notes": tricks.get("design_notes", ""),
+            "attempts": [
+                {
+                    "attempt": a["attempt"],
+                    "errors": a["errors"],
+                    "tricks": a["tricks"],
+                    "seconds": a.get("seconds"),
+                }
+                for a in tricks.get("attempts", [])
+            ],
+        }
+        if tricks
+        else None,
     }
 
     with open(TEMPLATE_PATH, encoding="utf-8") as f:

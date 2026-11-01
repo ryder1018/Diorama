@@ -42,6 +42,14 @@ def build_index(showcase_dir: str) -> str:
         if os.path.exists(track_path):
             with open(track_path, encoding="utf-8") as f:
                 level = json.load(f).get("level", {})
+        # Muse Spark tricks (feature_designer.py), as the showcase page shows them.
+        tricks = {}
+        tricks_path = os.path.join(folder, "features.json")
+        if os.path.exists(tricks_path):
+            with open(tricks_path, encoding="utf-8") as f:
+                tricks = json.load(f)
+        mission = tricks.get("mission") or level.get("mission", "Ride the line")
+        trick_list = ", ".join(f"{t['type']} {t['label']}" for t in tricks.get("features", [])) or "—"
         thumb = _thumbnail(folder)
         behind = ", ".join(o["label"] for o in level.get("occluders", [])) or "—"
         page = f"{html.escape(name)}/showcase.html"
@@ -63,8 +71,9 @@ def build_index(showcase_dir: str) -> str:
     {'<img src="' + thumb + '" alt="">' if thumb else '<div class="noimg"></div>'}
     <div class="body">
       <div class="name">{html.escape(name)}</div>
-      <div class="mission">{html.escape(level.get("mission", "Ride the line"))}</div>
+      <div class="mission">{html.escape(mission)}</div>
       <div class="meta"><span>surface</span>{html.escape(", ".join(level.get("surfaces", [])) or "geometric")}</div>
+      <div class="meta"><span>tricks</span>{html.escape(trick_list)}</div>
       <div class="meta"><span>behind</span>{html.escape(behind)}</div>
     </div>
   </a>
