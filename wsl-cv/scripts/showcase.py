@@ -247,7 +247,9 @@ def build_showcase(image_path: str, inference_dir: str, send2unity_dir: str, out
     # Muse Spark's distance per region (depth_order.py), shown on the labels in the Depth step.
     depth_order = _load_json(os.path.join(inference_dir, f"{base}_depth_order.json")) or {}
     meters = {int(region): value for region, value in depth_order.get("meters", {}).items()}
-    timings = {**scene.get("timings", {}), "depth": depth_order.get("seconds")}
+    # Only the steps this page times; runs made before Muse Spark took over depth also carry a stale "da3".
+    scene_timings = scene.get("timings", {})
+    timings = {key: scene_timings.get(key) for key in ("concepts", "sam31")} | {"depth": depth_order.get("seconds")}
 
     depth_color, depth_disp = _depth_assets(depth16, (width, height))
     sam_overlay, anchors = _sam_assets(image_bgr, labels, objects, meters)

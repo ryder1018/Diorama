@@ -33,3 +33,6 @@ doc/
 .vscode/
 .DS_Store
 .ipynb_checkpoints/
+
+# Demo video script and overlays (local only)
+video_script/
