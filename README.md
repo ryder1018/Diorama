@@ -2,7 +2,7 @@
 
 **Turn any photo into a playable 2.5D skate level.**
 
-SkateP is an exploration of 2.5D: how much of the real world's depth can a single phone photo carry? It splits the photo into depth-ordered layers, so a flat picture becomes a small stage with a foreground, a ground to ride on and a background, and the character moves *between* them, passing behind the real chair or car in your shot. The goal is the sense of space you get from VR or AR, on an ordinary flat screen, with no headset, depth sensor or 3D scan: just one photo.
+SkateP gives a single photo a sense of depth. It splits the picture into 2.5D layers, so your character skates *between* the real objects in your shot, behind a chair or a passing car, like AR on an ordinary screen.
 
 To make that space playable, SkateP finds what you can ride on, draws a line across it, places jumps and grinds, and repaints the level in an art style of your choice. The level loads straight into a Unity skateboarding game on your phone.
 
