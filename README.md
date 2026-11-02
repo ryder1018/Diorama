@@ -72,8 +72,6 @@ All three are called through the Meta Model API; no other model runs, so the bac
 
 All code in this repository was written during the hackathon, with one exception: `unity_client/MobileCameraCapture.cs`, the photo capture and upload script of my existing Unity skateboarding game, which I extended during the event (map style picker, mission display, level metadata). The game itself is not in this repository.
 
-SkateP grew out of an earlier prototype of mine that cut a photo into layers with a depth network and SAM 2's unlabeled masks. Its code is the repository's first commit ([`e5c732f`](https://github.com/ryder1018/skateboard-META/commit/e5c732f)) and has since been replaced file by file; two of its ideas live on in new code, depth-sorted layers (`layers.py`) and a smoothed top-edge track (`track.py`).
-
 | Built during the hackathon | |
 |---|---|
 | Perception | Muse Spark chooses what to segment per photo and SAM 3.1 segments it (`perception.py`, `sam31_segmentation.py`); Muse Spark estimates each object's distance, checked against the ground plane (`depth_order.py`) |
@@ -127,7 +125,7 @@ This runs the full pipeline (2–4 minutes) and writes `showcase/cup/`: the Unit
 Drop photos into `wsl-cv/photos/`, then:
 
 ```bash
-./run_photos.sh --preview      # track + layers only, ~1 min per photo; opens showcase/preview.html
+./run_photos.sh --preview      # track, depth + layers only, ~1.5 min per photo; opens showcase/preview.html
 ./run_photos.sh cup street2d   # build the photos you picked (reuses their previewed track)
 ./run_photos.sh                # or build every photo that has no showcase yet
 ```

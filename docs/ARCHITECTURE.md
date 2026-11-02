@@ -6,7 +6,7 @@ SkateP has three parts that run on different machines. A photo crosses all three
 |---|---|---|
 | `unity_client/` | phone (Unity, C#) | capture or pick photos, upload, poll, load the returned level into the game |
 | `win-server/` | Windows PC (Flask) | the address the phone can reach; forwards each photo to WSL and holds the result until the phone collects it |
-| `wsl-cv/` | WSL / Linux (FastAPI) | builds the level: SAM 3.1 objects, Muse Spark level design and depth, Muse Image art |
+| `wsl-cv/` | WSL / Linux (FastAPI) | the 2.5D scene agent: SAM 3.1 objects, Muse Spark ground, depth and level design, Muse Image art |
 
 `unity_client/` holds only the scripts that connect the existing Unity skate game to this backend, not the game project itself.
 

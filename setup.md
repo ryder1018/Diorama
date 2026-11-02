@@ -36,7 +36,7 @@ It listens on port 5000. Settings are environment variables:
 | `SKATEP_WSL_URL` | `http://127.0.0.1:9000/infer` | the level API |
 | `SKATEP_WSL_TIMEOUT` | `300` | seconds to wait for one level |
 
-For a phone, allow inbound TCP 5000 in Windows Firewall and enter the PC's Wi-Fi IPv4 address (`ipconfig`) in the app's Change IP box. A phone cannot reach a gateway running inside WSL (NAT), but for Unity Editor tests on the same PC the gateway can also run in WSL (`cd win-server && python server.py`).
+For a phone, allow inbound TCP 5000 in Windows Firewall and enter the PC's Wi-Fi IPv4 address (`ipconfig`) in the app's server IP field; the app remembers it. A phone cannot reach a gateway running inside WSL (NAT), but for Unity Editor tests on the same PC the gateway can also run in WSL (`cd win-server && python server.py`).
 
 ## 3. Try the upload flow by hand
 
