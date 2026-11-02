@@ -7,7 +7,7 @@
 # pipeline into showcase/<name>/, and opens showcase/<name>/showcase.html in
 # the Windows browser (unless NO_OPEN=1). --video also renders
 # showcase/<name>/showcase.mp4. Names are reduced to [A-Za-z0-9_-].
-# Run inside the project's Python env (e.g. `conda activate da3_skate`).
+# Run inside the project's Python env (see the root README).
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
@@ -31,7 +31,7 @@ NAME="${NAME:-$(basename "${PHOTO%.*}")}"
 NAME="$(printf '%s' "$NAME" | tr -cs 'A-Za-z0-9_-' '_' | sed 's/^_*//; s/_*$//')"
 OUT="$HERE/showcase/$NAME"
 PYTHON="${PYTHON:-python}"
-# Ignore ~/.local packages (an old torch there would shadow the env's).
+# Ignore ~/.local packages (old copies there would shadow the env's).
 export PYTHONNOUSERSITE=1
 
 # MODEL_API_KEY for SAM 3.1 / Muse Spark lives in the repo root .env.

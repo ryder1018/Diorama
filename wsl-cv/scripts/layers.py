@@ -1,7 +1,8 @@
 """Step 3: cut the photo into 2.5D layers and the ground mask.
 
 Every SAM 3.1 region, and the unsegmented rest of the photo, joins the near,
-mid or far layer by its mean DA3 depth: the regions are split into thirds.
+mid or far layer by its distance as Muse Spark estimates it (depth_order.py):
+the regions are split into thirds.
 The skater rides between the mid and near layers, so near objects are the
 ones it passes behind.
 
@@ -22,7 +23,6 @@ import os
 
 import cv2
 import numpy as np
-import scipy.ndimage
 
 LAYER_FILES = ("merged_layer_01.png", "merged_layer_02.png", "merged_layer_03.png")
 LAYER_NAMES = ("near", "mid", "far")
@@ -38,19 +38,19 @@ def edge_seam(labels: np.ndarray) -> np.ndarray:
     return (labels == 0) & (cv2.dilate(objects, np.ones((5, 5), np.uint8), iterations=SEAM_PX // 2) > 0)
 
 
-def assign_layers(labels: np.ndarray, depth: np.ndarray, count: int = len(LAYER_FILES)) -> dict[int, int]:
-    """Layer index (0 = near) for every region id >= 0, by thirds of mean depth."""
+def assign_layers(labels: np.ndarray, distances: dict[int, float], count: int = len(LAYER_FILES)) -> dict[int, int]:
+    """Layer index (0 = near) for every region id >= 0: the regions split into thirds by distance.
+
+    Regions at the same distance stay together; one that sits exactly on a
+    cut (two objects side by side, say) goes to the nearer layer.
+    """
     ids = [int(i) for i in np.unique(labels) if i >= 0]
     if len(ids) <= 1:
         return {i: 0 for i in ids}
-    means = np.asarray(scipy.ndimage.mean(depth, labels, ids), dtype=np.float64)
-    cuts = np.quantile(means, [k / count for k in range(1, count)])
-    layer = np.searchsorted(cuts, means, side="right")
-    # The thirds can land exactly on a region; such a region is ambiguous, so
-    # it stays on the middle layer, which neither hides the skater nor is
-    # painted over by the background fill.
-    on_cut = layer != np.searchsorted(cuts, means, side="left")
-    layer = np.minimum(np.where(on_cut, count // 2, layer), count - 1)
+    far = max(distances.values())
+    meters = np.array([distances.get(i, far) for i in ids], dtype=np.float64)
+    cuts = np.quantile(meters, [k / count for k in range(1, count)])
+    layer = np.minimum(np.searchsorted(cuts, meters, side="left"), count - 1)
     return dict(zip(ids, layer.tolist()))
 
 
@@ -75,21 +75,23 @@ def _soft_alpha(mask: np.ndarray) -> np.ndarray:
 
 def cut_layers(
     image_path: str,
-    depth_path: str,
     labels_path: str,
     out_dir: str,
+    distances: dict[int, float],
     ground_ids: list[int] | None = None,
 ) -> dict:
-    """Write the three layer images, the ground mask and layers.json; returns the layers.json content."""
+    """Write the three layer images, the ground mask and layers.json; returns the layers.json content.
+
+    distances: each region's distance from the camera (depth_order.py).
+    """
     photo = cv2.imread(image_path)
-    depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
     labels = np.load(labels_path).astype(np.int32)
-    if photo is None or depth is None:
-        raise FileNotFoundError(f"Missing photo or depth map for {image_path}")
+    if photo is None:
+        raise FileNotFoundError(f"Missing photo {image_path}")
     os.makedirs(out_dir, exist_ok=True)
 
     labels[edge_seam(labels)] = -1
-    layer_of = assign_layers(labels, depth)
+    layer_of = assign_layers(labels, distances=distances)
 
     present = set(layer_of)
     ground = [i for i in (ground_ids or []) if i in present]

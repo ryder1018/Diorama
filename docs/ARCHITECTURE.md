@@ -6,7 +6,7 @@ SkateP has three parts that run on different machines. A photo crosses all three
 |---|---|---|
 | `unity_client/` | phone (Unity, C#) | capture or pick photos, upload, poll, load the returned level into the game |
 | `win-server/` | Windows PC (Flask) | the address the phone can reach; forwards each photo to WSL and holds the result until the phone collects it |
-| `wsl-cv/` | WSL / Linux with a CUDA GPU (FastAPI) | builds the level: DA3 depth, SAM 3.1 objects, Muse Spark level design, Muse Image art |
+| `wsl-cv/` | WSL / Linux (FastAPI) | builds the level: SAM 3.1 objects, Muse Spark level design and depth, Muse Image art |
 
 `unity_client/` holds only the scripts that connect the existing Unity skate game to this backend, not the game project itself.
 
@@ -24,7 +24,7 @@ sequenceDiagram
         App->>Gate: POST /upload (photo, style, X-API-KEY)
         Gate-->>App: {"status": "accepted"}
         Gate->>API: POST /infer (photo, style)
-        Note over API: depth + objects, riding surface,<br/>layers, track + occluders,<br/>optional Muse Image style
+        Note over API: objects, riding surface, depth,<br/>layers, track + occluders,<br/>optional Muse Image style
         API-->>Gate: layers (base64 PNG) + metadata
         loop until success, error or timeout
             App->>Gate: GET /download
@@ -35,7 +35,7 @@ sequenceDiagram
 ```
 
 - **One level at a time.** The gateway keeps a single job; the app uploads the selected photos one after another and polls for each, so jobs never overlap.
-- **Timing.** A level takes about 60–80 s (longer when Muse Spark needs repairs or Muse Image retries), so the app polls by elapsed time (`processingTimeoutSeconds`, default 320 s), not by attempt count.
+- **Timing.** A level takes about 75–105 s (longer when Muse Spark needs repairs or Muse Image retries), so the app polls by elapsed time (`processingTimeoutSeconds`, default 320 s), not by attempt count.
 - **Art style.** The app's map style picker (`ArtStyleSelector.cs`) sends `style`; the gateway forwards it; the API returns the Muse Image layers, cut with the same masks, plus `metadata.art_style` and a matching `metadata.track_color`. `original` keeps the photo's pixels. The response shape never changes.
 - **Drawing order.** Unity draws background (far layer), gameplay (mid), the track and skater, then foreground (near). `metadata.occluded_segments` lists the track stretches the foreground covers, by point index; `metadata.level.occluders` names those objects.
 - **On the device.** Each level's metadata is also saved to `Application.persistentDataPath/schema_XX.json` (and `schema.json`). `LocalLevelTester` loads its baked levels only in the Editor unless `applyOnStartInBuilds` is set.

@@ -153,8 +153,8 @@
     <div class="kv" id="photoKv"></div>
   </div>
   <div class="card" data-card="depth">
-    <h2>Depth Anything 3</h2>
-    <div class="big">Per-pixel depth, lifted into a relief</div>
+    <h2>Muse Spark depth</h2>
+    <div class="big">How far is each object? Lifted into a relief</div>
     <div class="kv" id="depthKv"></div>
   </div>
   <div class="card" data-card="concepts">
@@ -172,7 +172,7 @@
   </div>
   <div class="card" data-card="layers">
     <h2>2.5D layers</h2>
-    <div class="big">Regions sorted by DA3 depth</div>
+    <div class="big">Regions sorted by distance</div>
     <div class="legend">
       <div><i style="background:#ffd36a"></i>Foreground · in front of the skater</div>
       <div><i style="background:var(--lime)"></i>Gameplay · the riding plane</div>
@@ -478,10 +478,10 @@ const STAGES = [];
 {
   const spec = [
     ["photo", "Photo", "input", 3.5],
-    ["depth", "Depth", "Depth Anything 3 · local GPU", 6.5],
     ["concepts", "Concepts", "Muse Spark 1.3", 5.5],
     ["sam", "Segmentation", "SAM 3.1 · Meta Model API", 6.5],
-    ["layers", "2.5D layers", BACKGROUND_FILL ? "depth sort + Muse Image fill" : "depth sort + inpaint", 6.5],
+    ["depth", "Depth", "Muse Spark 1.3 · checked on the ground", 6.5],
+    ["layers", "2.5D layers", BACKGROUND_FILL ? "distance sort + Muse Image fill" : "distance sort + inpaint", 6.5],
     ["style", "Restyle", "Muse Image 1.0 · registered", styleLength],
     ["design", "Track", "Muse Spark 1.3 · verify loop", designLength],
     ["tricks", "Tricks", "Muse Spark 1.3 · verify loop", tricksLength],
@@ -545,7 +545,7 @@ async function build() {
     styleTex.push({ photo: sp, foreground: sfg, gameplay: sgp, background: sbg });
   }
 
-  // Relief: one plane displaced by DA3 depth, cross-fading photo / depth / SAM.
+  // Relief: one plane displaced by Muse Spark's depth, cross-fading photo / SAM / depth.
   const segX = 320, segY = Math.max(32, Math.round(320 / DATA.aspect));
   relief = new THREE.Mesh(
     new THREE.PlaneGeometry(W, H, segX, segY),
@@ -580,8 +580,10 @@ async function build() {
 
   // SAM 3.1 object labels, anchored on the relief surface.
   for (const o of DATA.objects) {
-    const l = label(`<span style="color:${o.color}">●</span> ${o.id}`, "", o.score != null ? o.score.toFixed(2) : "");
+    const score = o.score != null ? o.score.toFixed(2) : "";
+    const l = label(`<span style="color:${o.color}">●</span> ${o.id}`, "", score);
     l.userData.uv = o.at;
+    l.userData.extra = { score, meters: o.meters != null ? `${o.meters.toFixed(1)} m` : score };
     scene.add(l);
     samLabels.push(l);
   }
@@ -981,7 +983,7 @@ const fmtS = (x) => (x == null ? "" : `${Number(x).toFixed(1)}s`);
 function buildUI() {
   // Styles are generated in parallel, so the step takes as long as the slowest one.
   const styleTimes = STYLES.map((s) => s.seconds).filter((x) => x != null);
-  const timeFor = { depth: DATA.timings.da3, concepts: DATA.timings.concepts, sam: DATA.timings.sam31,
+  const timeFor = { depth: DATA.timings.depth, concepts: DATA.timings.concepts, sam: DATA.timings.sam31,
     style: styleTimes.length ? Math.max(...styleTimes) : null,
     design: DATA.attempts.reduce((s, a) => s + (a.seconds || 0), 0) || null,
     tricks: trickAttempts.reduce((s, a) => s + (a.seconds || 0), 0) || null };
@@ -1015,7 +1017,9 @@ function buildUI() {
   }
 
   document.getElementById("photoKv").innerHTML = `<span>file</span><span>${DATA.title}</span><span>aspect</span><span>${DATA.aspect.toFixed(2)}</span>`;
-  document.getElementById("depthKv").innerHTML = `<span>model</span><span>Depth Anything 3 (small)</span><span>runs</span><span>local GPU</span><span>time</span><span>${fmtS(DATA.timings.da3) || "–"}</span>`;
+  const ranged = DATA.objects.filter((o) => o.meters != null).map((o) => o.meters);
+  const span = ranged.length ? `${Math.min(...ranged).toFixed(1)}–${Math.max(...ranged).toFixed(1)} m` : "–";
+  document.getElementById("depthKv").innerHTML = `<span>model</span><span>Muse Spark 1.3</span><span>check</span><span>ground contact</span><span>range</span><span>${span}</span><span>time</span><span>${fmtS(DATA.timings.depth) || "–"}</span>`;
 
   const chip = (t, cls) => `<span class="chip ${cls}">${t}</span>`;
   document.getElementById("chipsSkate").innerHTML = DATA.concepts.skateable.map((c) => chip(c, "skate")).join("");
@@ -1067,7 +1071,7 @@ function captionFor(stage, t) {
   const nCon = DATA.concepts.skateable.length + DATA.concepts.scenery.length;
   switch (stage.key) {
     case "photo": return ["One photo in.", "any street, desk or park becomes a skate level"];
-    case "depth": return ["Depth Anything 3 lifts it into 3D", "per-pixel depth · runs on the local GPU"];
+    case "depth": return ["Muse Spark judges how far each one is", "a distance per object · checked against where it stands on the ground"];
     case "concepts": return ["Muse Spark reads the scene", `${nCon} things to look for, chosen for this photo`];
     case "sam": return ["SAM 3.1 finds every one of them", `${nObj} objects segmented from text prompts`];
     case "layers": return ["Depth-sorted into 2.5D layers", "foreground · gameplay · background"];
@@ -1176,16 +1180,20 @@ function applyState(t) {
   const u = relief.material.uniforms;
   const dispMax = H * 0.3;
   u.uDisp.value = dispMax * ramp(t, S.depth.t0 + 0.8, S.depth.t0 + 3.6) * (1 - ramp(t, S.layers.t0, S.layers.t0 + 1.6));
-  u.uDepthMix.value = ramp(t, S.depth.t0 + 0.3, S.depth.t0 + 1.6) * (1 - ramp(t, S.concepts.t0, S.concepts.t0 + 1.2));
-  u.uSamMix.value = ramp(t, S.sam.t0 + 0.3, S.sam.t0 + 1.5) * (1 - ramp(t, S.layers.t0, S.layers.t0 + 1.2));
+  u.uDepthMix.value = ramp(t, S.depth.t0 + 0.3, S.depth.t0 + 1.6) * (1 - ramp(t, S.layers.t0, S.layers.t0 + 1.2));
+  u.uSamMix.value = ramp(t, S.sam.t0 + 0.3, S.sam.t0 + 1.5) * (1 - ramp(t, S.depth.t0 + 0.3, S.depth.t0 + 1.6));
   u.uOpacity.value = 1 - ramp(t, S.layers.t0 + 1.2, S.layers.t0 + 2.4);
   relief.visible = u.uOpacity.value > 0.001;
 
   // SAM labels sit on the displaced surface.
+  const showMeters = t >= S.depth.t0 + 0.6;
   samLabels.forEach((l, i) => {
     const [lu, lv] = l.userData.uv;
     l.position.copy(toWorld(lu, lv, 0.15 + u.uDisp.value * 0.85));
     setLabel(l, ramp(t, S.sam.t0 + 1.0 + i * 0.1, S.sam.t0 + 1.3 + i * 0.1) * (1 - ramp(t, S.layers.t0, S.layers.t0 + 0.8)));
+    const em = l.userData.el.querySelector("em");
+    const extra = showMeters ? l.userData.extra.meters : l.userData.extra.score;
+    if (em && em.textContent !== extra) em.textContent = extra;
   });
 
   // Layers: fade in, explode along z, then compress to play depth for the ride.
@@ -1325,7 +1333,7 @@ function applyState(t) {
   if (!manualCamera) {
     const st = stageAt(t);
     const beforeDesign = S.style ? K.style : K.layers;
-    const prevKey = { photo: K.front, depth: K.front, concepts: K.relief, sam: K.concepts, layers: K.sam, style: K.layers, design: beforeDesign, tricks: K.design, ride: K.design };
+    const prevKey = { photo: K.front, concepts: K.front, sam: K.concepts, depth: K.sam, layers: K.relief, style: K.layers, design: beforeDesign, tricks: K.design, ride: K.design };
     const thisKey = { photo: K.front, depth: K.relief, concepts: K.concepts, sam: K.sam, layers: K.layers, style: K.style, design: K.design, tricks: K.design, ride: K.design };
     blendCam(prevKey[st.key], thisKey[st.key], ramp(t, st.t0, st.t0 + 2.6));
     if (st.key === "ride" && path.length >= 2) {
@@ -1528,9 +1536,9 @@ const CHORDS = [   // Fmaj7 · Em7 · Dm7 · Cmaj9, a slow descending lo-fi loop
 // What plays in each step: pad cutoff, arp notes per beat, then the drum kit and bass.
 const ARRANGE = {
   photo:    { pad: 600, arp: 0 },
-  depth:    { pad: 800, arp: 1 },
-  concepts: { pad: 1000, arp: 1, kick: 1, hats: 1 },
-  sam:      { pad: 1100, arp: 1, kick: 1, hats: 1, bass: 1 },
+  concepts: { pad: 800, arp: 1 },
+  sam:      { pad: 1000, arp: 1, kick: 1, hats: 1 },
+  depth:    { pad: 1100, arp: 1, kick: 1, hats: 1, bass: 1 },
   layers:   { pad: 1300, arp: 2, kick: 1, hats: 1, bass: 1, snare: 1 },
   style:    { pad: 1500, arp: 2, kick: 1, hats: 1, bass: 1, snare: 1 },
   design:   { pad: 900, arp: 0, kick: 1, hats: 1, bass: 1 },

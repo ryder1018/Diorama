@@ -1,5 +1,4 @@
-# SkateP backend. Install Depth Anything 3 first (pip install -e <Depth-Anything-3 checkout>);
-# it brings torch and its own dependencies.
+# SkateP backend. Every model runs behind the Meta Model API, so there is no GPU or deep-learning stack.
 numpy>=1.26,<2
 opencv-python>=4.9
 scipy>=1.11

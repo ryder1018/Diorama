@@ -1,7 +1,7 @@
 """Build the 3D pipeline showcase (a single self-contained HTML file) for one run.
 
 The page replays the whole photo -> level pipeline in a three.js scene:
-photo -> DA3 depth relief -> Muse Spark concepts -> SAM 3.1 objects ->
+photo -> Muse Spark concepts -> SAM 3.1 objects -> Muse Spark depth relief ->
 depth-sorted 2.5D layers -> Muse Image restyles -> Muse Spark surface choice +
 track -> Muse Spark tricks (features.json, when present) -> ride, passing behind
 the objects that stand in front of the track.
@@ -66,9 +66,9 @@ def _depth_assets(depth16: np.ndarray, size: tuple[int, int]) -> tuple[str, str]
 
 
 def _sam_assets(
-    image_bgr: np.ndarray, labels: np.ndarray, objects: list[dict[str, Any]]
+    image_bgr: np.ndarray, labels: np.ndarray, objects: list[dict[str, Any]], meters: dict[int, float]
 ) -> tuple[str, list[dict[str, Any]]]:
-    """Darkened photo with colored masks and outlines, plus a label anchor per object."""
+    """Darkened photo with colored masks and outlines, plus a label anchor (and distance) per object."""
     height, width = labels.shape
     overlay = (image_bgr * 0.42).astype(np.float32)
     outlines = np.zeros((height, width), dtype=np.uint8)
@@ -107,6 +107,7 @@ def _sam_assets(
                 "score": obj.get("score"),
                 "at": [round(x / (width - 1), 4), round(y / (height - 1), 4)],
                 "color": "#%02x%02x%02x" % (color[2], color[1], color[0]),
+                "meters": meters.get(obj["label_id"]),
             }
         )
 
@@ -179,9 +180,13 @@ def build_showcase(image_path: str, inference_dir: str, send2unity_dir: str, out
     attempts = _load_json(os.path.join(send2unity_dir, "level_design_log.json")) or []
     # Jumps and grinds from feature_designer.py (showcase only; absent on older runs).
     tricks = _load_json(os.path.join(send2unity_dir, "features.json"))
+    # Muse Spark's distance per region (depth_order.py), shown on the labels in the Depth step.
+    depth_order = _load_json(os.path.join(inference_dir, f"{base}_depth_order.json")) or {}
+    meters = {int(region): value for region, value in depth_order.get("meters", {}).items()}
+    timings = {**scene.get("timings", {}), "depth": depth_order.get("seconds")}
 
     depth_color, depth_disp = _depth_assets(depth16, (width, height))
-    sam_overlay, anchors = _sam_assets(image_bgr, labels, objects)
+    sam_overlay, anchors = _sam_assets(image_bgr, labels, objects, meters)
 
     meta = track.get("level") or {}
     level = {
@@ -214,7 +219,7 @@ def build_showcase(image_path: str, inference_dir: str, send2unity_dir: str, out
             "surface": _mask_overlay(track_mask, None, (58, 255, 196)),
         },
         "concepts": scene.get("concepts", {"skateable": [], "scenery": [], "source": "unknown"}),
-        "timings": scene.get("timings", {}),
+        "timings": timings,
         "styles": _style_assets(send2unity_dir),
         "background": (_load_json(os.path.join(send2unity_dir, "background.json")) or {}).get("source", "inpaint"),
         "objects": anchors,

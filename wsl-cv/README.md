@@ -1,20 +1,21 @@
 # SkateP backend (`wsl-cv/`)
 
-Turns one photo into a playable 2.5D skate level: depth-sorted layers, a riding line, the objects the skater passes behind, Muse Spark tricks, Muse Image art styles, and a 3D showcase of the whole run. It runs in WSL/Linux on a CUDA GPU; installation is in the root [`README.md`](../README.md#installation). Set `MODEL_API_KEY` (or put it in the repo-root `.env`, which the scripts load).
+Turns one photo into a playable 2.5D skate level: depth-sorted layers, a riding line, the objects the skater passes behind, Muse Spark tricks, Muse Image art styles, and a 3D showcase of the whole run. Every model call goes to Meta's models through the Meta Model API, so it needs no GPU; installation is in the root [`README.md`](../README.md#installation). Set `MODEL_API_KEY` (or put it in the repo-root `.env`, which the scripts load).
 
 ## Pipeline
 
 | Step | Module | What happens |
 |---|---|---|
-| 1 | `perception.py` (+ `depth.py`, `sam31_segmentation.py`) | Muse Spark lists the concepts worth segmenting; SAM 3.1 masks them while Depth Anything 3 computes depth on the local GPU. Writes `<base>_depth_16bit.png`, `<base>_depth_mask.npy` (label map), `<base>_sam31_objects.json`. |
+| 1 | `perception.py`, `sam31_segmentation.py` | Muse Spark lists the concepts worth segmenting; SAM 3.1 masks them. Writes `<base>_depth_mask.npy` (label map) and `<base>_sam31_objects.json`. |
 | 2 | `level_designer.plan_track` | Muse Spark picks the riding surface; the choice is verified against the masks and repaired if needed. |
-| 3 | `layers.py` | Regions split into near / mid / far by mean depth (thirds); writes `merged_layer_01..03.png`, the ground mask `layer_00_mask.npy` and `layers.json`. |
-| 4 | `track.py`, `level_designer` | The ground edge is continued behind standing objects, traced into `track_points.json`, and given its occluders and mission (`finalize_level`). |
-| 5 | `feature_designer.py` | Muse Spark jumps and grinds, verified against the masks (`features.json`, showcase only). |
-| 6 | `muse_image.py` | Art styles and the background hidden behind the front layers. |
-| 7 | `showcase.py` | The self-contained 3D replay page. |
+| 3 | `depth_order.py` | Muse Spark estimates each region's distance in meters from the photo and a numbered copy of the regions. Checked against the ground plane: of two objects standing on the riding surface, the one whose base is clearly lower in the photo must be nearer; violations are repaired like the surface choice. Writes `<base>_depth_order.json` and, for the showcase relief, `<base>_depth_16bit.png`. |
+| 4 | `layers.py` | Regions split into near / mid / far by distance (thirds; ties go nearer); writes `merged_layer_01..03.png`, the ground mask `layer_00_mask.npy` and `layers.json`. |
+| 5 | `track.py`, `level_designer` | The ground edge is continued behind standing objects, traced into `track_points.json`, and given its occluders and mission (`finalize_level`). |
+| 6 | `feature_designer.py` | Muse Spark jumps and grinds, verified against the masks (`features.json`, showcase only). |
+| 7 | `muse_image.py` | Art styles and the background hidden behind the front layers. |
+| 8 | `showcase.py` | The self-contained 3D replay page. |
 
-`scripts/pipeline.py` runs them in order: `--preview` stops after step 4, `--resume` starts at step 5 from an earlier preview. The API (`scripts/infer.py`) runs steps 1–4 and, when a style is asked for, step 6.
+`scripts/pipeline.py` runs them in order: `--preview` stops after step 5, `--resume` starts at step 6 from an earlier preview. The API (`scripts/infer.py`) runs steps 1–5 and, when a style is asked for, step 7.
 
 ```bash
 python scripts/pipeline.py photo.jpg --out_dir run/outputs --send2unity_dir run [--styles comic,snow] [--preview | --resume]
@@ -23,9 +24,9 @@ python scripts/pipeline.py photo.jpg --out_dir run/outputs --send2unity_dir run 
 ### Trying Photos
 Drop photos into `wsl-cv/photos/` and run `./run_photos.sh` (inside the project env). Each new photo gets `showcase/<name>/showcase.html`, and `showcase/index.html` links them all; already-built photos are skipped (`--force` rebuilds, `--video` also renders MP4s). For a single photo anywhere on disk: `./try_photo.sh <photo> [name] [--video]`.
 
-To pick photos quickly, `./run_photos.sh --preview` runs only DA3, SAM 3.1 and the Muse Spark track (about a minute per photo; no tricks, Muse Image or 3D page) and opens `showcase/preview.html`: each photo with its track line, rideable ground and the objects the skater passes behind, or its near / track / mid / far layers in an exploded 3D stack. Mark photos with ☆ pick (← → browse, P picks, 1 2 3 switch views in the enlarged view), copy the generated `./run_photos.sh <names>` command, and run it: picked photos are finished from their previewed track (`pipeline.py --resume`), so the showcase rides the line you chose. Names given to `run_photos.sh` limit any mode to those photos.
+To pick photos quickly, `./run_photos.sh --preview` runs only SAM 3.1 and the Muse Spark track and depth (about 1.5 minutes per photo; no tricks, Muse Image or 3D page) and opens `showcase/preview.html`: each photo with its track line, rideable ground and the objects the skater passes behind, or its near / track / mid / far layers in an exploded 3D stack. Mark photos with ☆ pick (← → browse, P picks, 1 2 3 switch views in the enlarged view), copy the generated `./run_photos.sh <names>` command, and run it: picked photos are finished from their previewed track (`pipeline.py --resume`), so the showcase rides the line you chose. Names given to `run_photos.sh` limit any mode to those photos.
 
-`./run_photos.sh --restyle` adds Muse Image art styles to every showcase that is already built, reusing its DA3 / SAM 3.1 / track outputs (only the Muse Image calls run; cached styles are kept unless `--force`).
+`./run_photos.sh --restyle` adds Muse Image art styles to every showcase that is already built, reusing its SAM 3.1 / depth / track outputs (only the Muse Image calls run; cached styles are kept unless `--force`).
 
 ### Muse Image Art Styles
 After the layers and the track exist, `scripts/muse_image.py` asks Muse Image (`muse-image-1.0`, Responses API, $0.01/image) to repaint the photo in each style (`comic`, `cyberpunk`, `snow`, `pixel`, `watercolor`; the prompts are in `STYLES`). The styles run in parallel, and each takes 15–45 s. Every prompt also tells the model to keep the composition (same camera, objects, outlines).
@@ -43,7 +44,7 @@ Outputs: `<send2unity_dir>/styles/<name>/{styled_raw,styled,fill_raw,merged_laye
 ```bash
 python scripts/muse_image.py <image> <send2unity_dir> [--styles comic,snow|all|none] [--force] [--no-photo-background] [--objects <run>_sam31_objects.json]
 ```
-`pipeline.py` runs every style by default (`--styles` or `MUSE_IMAGE_STYLES` narrows it; `none` skips it). The `/infer` API restyles only when asked: send the form field `style=<name>`, or set `MUSE_IMAGE_STYLE=<name>` on the server. The returned layers are then the styled ones, `metadata.track_color` follows the art, and `metadata.art_style` records the style. The restyle call starts as soon as the photo arrives, alongside DA3 / SAM 3.1 / Muse Spark, and the background fill follows it (for an unstyled level it runs alongside track extraction). In tests, with Muse Spark verifying on the first attempt, a styled level took ~60–75 s and an unstyled one ~45–60 s. If Muse Image fails, the photo's layers are returned.
+`pipeline.py` runs every style by default (`--styles` or `MUSE_IMAGE_STYLES` narrows it; `none` skips it). The `/infer` API restyles only when asked: send the form field `style=<name>`, or set `MUSE_IMAGE_STYLE=<name>` on the server. The returned layers are then the styled ones, `metadata.track_color` follows the art, and `metadata.art_style` records the style. The restyle call starts as soon as the photo arrives, alongside SAM 3.1 and Muse Spark, and the background fill follows it (for an unstyled level it runs alongside track extraction). In tests, with Muse Spark verifying on the first attempt, a level took about 75–105 s. If Muse Image fails, the photo's layers are returned.
 
 ### Muse Spark Tricks (showcase only)
 After the track exists, `scripts/feature_designer.py` asks Muse Spark where a skater would jump or grind on it. It sees the photo with the track drawn on it and every SAM 3.1 object that meets the track (where, how tall, whether its base stands on the line, whether it is in front of the skater), and proposes up to four tricks, or none. Each trick is checked against the masks:
@@ -58,7 +59,7 @@ python scripts/feature_designer.py <image> <inference_dir> <send2unity_dir>
 ```
 
 ### 3D Pipeline Showcase
-Every `scripts/pipeline.py` run also writes `<send2unity_dir>/showcase.html`: a self-contained three.js page that replays the run (photo → DA3 depth relief → Muse Spark concepts → SAM 3.1 objects → 2.5D layers → Muse Image restyles → Muse Spark design/verify loop → Muse Spark tricks → ride). The Tricks step appears only when `features.json` exists and Muse Spark was asked: each rejected set draws in red with its violations and fades, then the verified jumps (cyan arcs, as high as the mask check measured) and grinds (orange) draw; in the ride the skater pops over the arcs and throws sparks on the grinds. Open it in a browser (it loads three.js from a CDN). Controls: space play/pause, R restart, 1–8 jump to a step, drag to orbit, C back to the cinematic camera, H hide the UI for screen recording, M sound on/off, F foreground fade on/off (by default the foreground fades to 35% while the skater is behind it, like Unity's ForegroundOcclusionFader; off keeps it opaque so real objects fully hide the skater; `?fade=0` starts with it off).
+Every `scripts/pipeline.py` run also writes `<send2unity_dir>/showcase.html`: a self-contained three.js page that replays the run (photo → Muse Spark concepts → SAM 3.1 objects → Muse Spark depth relief, each object labelled with its distance → 2.5D layers → Muse Image restyles → Muse Spark design/verify loop → Muse Spark tricks → ride). The Tricks step appears only when `features.json` exists and Muse Spark was asked: each rejected set draws in red with its violations and fades, then the verified jumps (cyan arcs, as high as the mask check measured) and grinds (orange) draw; in the ride the skater pops over the arcs and throws sparks on the grinds. Open it in a browser (it loads three.js from a CDN). Controls: space play/pause, R restart, 1–8 jump to a step, drag to orbit, C back to the cinematic camera, H hide the UI for screen recording, M sound on/off, F foreground fade on/off (by default the foreground fades to 35% while the skater is behind it, like Unity's ForegroundOcclusionFader; off keeps it opaque so real objects fully hide the skater; `?fade=0` starts with it off).
 
 **Skater:** in the Ride step a rider stands on the board: a sideways stance facing the camera, built from capsules and posed each frame with 2-bone IK (two kick pushes at the start, knee bob and arm sway while cruising, a crouch-pop over jump spans), with a lime outline so it reads on any art style. It is drawn between the gameplay and foreground layers like the board, so foreground objects hide it.
 
@@ -76,7 +77,8 @@ python scripts/render_showcase.py <send2unity_dir>/showcase.html --out showcase.
 
 *   `scripts/pipeline.py`: the steps above, as a CLI and as `build_level` / `finish_level` for the API.
 *   `scripts/infer.py`: the level API (FastAPI). Each request runs in its own temporary folder.
-*   `scripts/perception.py`, `scripts/depth.py`: step 1; `depth.py` loads Depth Anything 3 once per process.
+*   `scripts/perception.py`: step 1.
+*   `scripts/depth_order.py`: step 3.
 *   `scripts/sam31_segmentation.py`: Muse Spark proposes this photo's concepts (skateable + scenery) and a one-line setting; SAM 3.1 segments each concept through the Meta Model API; the masks become one label map, small objects first so handrails keep their own region.
 *   `scripts/muse_spark.py`: shared Muse Spark client (Responses API, JSON-schema output; model `$MUSE_SPARK_MODEL_ID`, default `muse-spark-1.3-contributor`).
 *   `scripts/level_designer.py`: Muse Spark surface choice with mask verification, track repair behind standing objects, occluders (foreground objects in the skater's corridor, also written as Unity's `occluded_segments`), mission, `level_vis.png`.
@@ -93,7 +95,7 @@ uvicorn scripts.infer:app --host 0.0.0.0 --port 9000      # from wsl-cv/
 curl -X POST http://127.0.0.1:9000/infer -F "photo=@photo.jpg" -F "style=comic" -o level.json
 ```
 
-`POST /infer` takes the multipart fields `photo` and, optionally, `style` (`comic`, `cyberpunk`, `snow`, `pixel`, `watercolor`, or `original`; default `$MUSE_IMAGE_STYLE`, else the photo's own pixels). A level takes about 60–80 s. The response:
+`POST /infer` takes the multipart fields `photo` and, optionally, `style` (`comic`, `cyberpunk`, `snow`, `pixel`, `watercolor`, or `original`; default `$MUSE_IMAGE_STYLE`, else the photo's own pixels). A level takes about 75–105 s. The response:
 
 ```json
 {
@@ -133,9 +135,7 @@ curl -X POST http://127.0.0.1:9000/infer -F "photo=@photo.jpg" -F "style=comic" 
 |---|---|---|
 | `MODEL_API_KEY` | (required) | Meta Model API key |
 | `MUSE_IMAGE_STYLES` / `MUSE_IMAGE_STYLE` | all / none | styles for `pipeline.py` / the API |
-| `MUSE_SPARK_MAX_ATTEMPTS` | 3 | verify-and-repair rounds for the surface and the tricks |
-| `DA3_MODEL_NAME`, `DA3_INPUT_SIZE` | `depth-anything/da3-small`, 768 | depth model and its resolution |
-| `PIPELINE_OUTPUT_WIDTH`, `PIPELINE_INFERENCE_WIDTH` | 1024, 768 | working width of the level / of the models' input |
+| `MUSE_SPARK_MAX_ATTEMPTS` | 3 | verify-and-repair rounds for the surface, the depth and the tricks |
+| `PIPELINE_OUTPUT_WIDTH`, `PIPELINE_INFERENCE_WIDTH` | 1024, 768 | working width of the level / of SAM 3.1's input |
 | `LEVEL_SKATER_HEIGHT` | 0.15 | skater height (fraction of the photo) used for occluders and tricks |
 
-Depth Anything 3 weights download from Hugging Face on first use and are cached there.

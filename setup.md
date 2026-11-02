@@ -40,7 +40,7 @@ For a phone, allow inbound TCP 5000 in Windows Firewall and enter the PC's Wi-Fi
 
 ## 3. Try the upload flow by hand
 
-This is what the app does: upload, then poll until the level is ready (about a minute).
+This is what the app does: upload, then poll until the level is ready (about 1.5 minutes).
 
 ```powershell
 curl.exe -X POST http://127.0.0.1:5000/upload -H "X-API-KEY: 0000" -F "photo=@C:\path\to\photo.jpg;type=image/jpeg" -F "style=comic"

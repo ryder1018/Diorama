@@ -3,13 +3,13 @@
 #
 #   ./run_photos.sh            # only photos without a showcase yet
 #   ./run_photos.sh cup street # only these photos (names as in showcase/)
-#   ./run_photos.sh --preview  # quick pass: DA3 + SAM 3.1 + Muse Spark track and layers only
+#   ./run_photos.sh --preview  # quick pass: SAM 3.1 + Muse Spark track, depth and layers only
 #                              # (no tricks, Muse Image or 3D page), then open showcase/preview.html
 #                              # to pick photos; building a picked one later keeps its previewed track.
 #   ./run_photos.sh --force    # rebuild all of them
 #   ./run_photos.sh --video    # also render an MP4 for each processed photo
 #   ./run_photos.sh --restyle  # (re)generate Muse Image art styles and background fills for every built
-#                              # showcase, reusing its DA3/SAM/track outputs;
+#                              # showcase, reusing its SAM/track outputs;
 #                              # cached styles are kept unless --force is given.
 #                              # MUSE_IMAGE_STYLES=comic,snow picks styles.
 #   ./run_photos.sh --tricks   # (re)place Muse Spark jumps/grinds (features.json) on every built
@@ -17,7 +17,7 @@
 #
 # Photos stay where they are; each one gets showcase/<name>/ (name = file name
 # reduced to [A-Za-z0-9_-]) and showcase/index.html links them all.
-# Run inside the project's Python env (e.g. `conda activate da3_skate`).
+# Run inside the project's Python env (see the root README).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

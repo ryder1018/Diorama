@@ -8,7 +8,7 @@ it is. That is close but not guaranteed, so each result is
      outlines (outline_offset) and an overall edge F1, raw and registered,
 so the claim "the SAM 3.1 masks still fit" is measured, not assumed. The
 layers are then re-cut from the styled pixels with the exact alphas
-layers.py produced from the SAM 3.1 + DA3 layering, so every style shares the
+layers.py produced from the SAM 3.1 + Muse Spark depth layering, so every style shares the
 same foreground / gameplay / background split and the same track.
 
 Outputs per run (next to the Unity layers):
@@ -588,7 +588,7 @@ def _stylize_one(name: str, photo: np.ndarray, style_dir: str, force: bool) -> d
 def prefetch_style(name: str, photo: np.ndarray, send2unity_dir: str) -> None:
     """Make the restyle call ahead of time; stylize_run then reuses the cached result.
 
-    A restyle needs only the photo, so infer.py starts it while DA3, SAM 3.1
+    A restyle needs only the photo, so infer.py starts it while SAM 3.1
     and Muse Spark run.
     """
     _stylize_one(name, photo, os.path.join(send2unity_dir, "styles", name), force=True)

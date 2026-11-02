@@ -13,16 +13,17 @@ Built solo by **Ryder Wu** for the **Meta Global AI Developer Hackathon (2026)**
 ## How it works
 
 ```
-photo ─► Depth Anything 3 ─► Muse Spark ─► SAM 3.1 ─► 2.5D layers ─► Muse Spark ─► Muse Spark ─► Muse Image ─► level
-         depth map           what's in     object      near / mid /    riding line,   jumps and    art style +
-                             this scene?   masks       far by depth    mission        grinds       background fill
+photo ─► Muse Spark ─► SAM 3.1 ─► Muse Spark ─► Muse Spark ─► 2.5D layers ─► Muse Spark ─► Muse Image ─► level
+         what's in     object      riding line,   distance of    near / mid /    jumps and    art style +
+         this scene?   masks       mission        each object    far             grinds       background fill
 ```
 
 1. **Read the scene.** Muse Spark looks at the photo and lists the objects worth finding: what could be skated (stairs, curbs, desk mats) and what is just scenery.
-2. **Segment.** SAM 3.1 turns each concept into pixel masks. Depth Anything 3 sorts them into foreground, gameplay and background layers.
+2. **Segment.** SAM 3.1 turns each concept into pixel masks.
 3. **Design the line.** Muse Spark picks the riding surface and writes the level's mission. Every proposal is checked against the masks (does the surface span the scene at ground level?) and violations are sent back for repair.
-4. **Add tricks.** Muse Spark proposes jumps over objects that stand on the line and grinds along edges that follow it. Each is verified geometrically (the jump arc must clear the mask, the grind must follow the edge) or dropped. Zero tricks is an allowed answer.
-5. **Restyle.** Muse Image repaints the photo as comic, cyberpunk, snow, pixel art or watercolor, and fills in what the foreground hides. Each render is registered back onto the photo and re-cut with the original masks, so the track and occluders still line up.
+4. **Judge the depth.** Muse Spark estimates how far each object is, in meters. The estimates are checked against the ground plane (of two objects standing on the riding surface, the one whose base is clearly lower in the photo must be nearer) and repaired the same way. The objects then split into foreground, gameplay and background layers.
+5. **Add tricks.** Muse Spark proposes jumps over objects that stand on the line and grinds along edges that follow it. Each is verified geometrically (the jump arc must clear the mask, the grind must follow the edge) or dropped. Zero tricks is an allowed answer.
+6. **Restyle.** Muse Image repaints the photo as comic, cyberpunk, snow, pixel art or watercolor, and fills in what the foreground hides. Each render is registered back onto the photo and re-cut with the original masks, so the track and occluders still line up.
 
 <table>
 <tr>
@@ -36,20 +37,20 @@ photo ─► Depth Anything 3 ─► Muse Spark ─► SAM 3.1 ─► 2.5D layer
 | Model | Role in SkateP |
 |---|---|
 | **SAM 3.1** | Segments the photo from text concepts into object masks; the masks drive the layers, the track and every geometric check. |
-| **Muse Spark 1.3** | Chooses what to segment, picks the riding surface, writes the mission, and designs jumps and grinds, each inside a verify-and-repair loop against the masks. |
+| **Muse Spark 1.3** | Chooses what to segment, picks the riding surface, estimates each object's distance, writes the mission, and designs jumps and grinds, each inside a verify-and-repair loop against the masks. |
 | **Muse Image 1.0** | Restyles the level into five art styles and fills the background hidden behind foreground objects. |
 
-All three are called through the Meta Model API. Depth comes from [Depth Anything 3](https://github.com/ByteDance-Seed/Depth-Anything-3) (`da3-small`), run locally.
+All three are called through the Meta Model API; no other model runs, so the backend needs no GPU.
 
 ## Built during the hackathon
 
 All code in this repository was written during the hackathon, with one exception: `unity_client/MobileCameraCapture.cs`, the photo capture and upload script of my existing Unity skateboarding game, which I extended during the event (map style picker, mission display, level metadata). The game itself is not in this repository.
 
-SkateP grew out of an earlier prototype of mine that cut a photo into layers with Depth Anything 3 and SAM 2's unlabeled masks. Its code is the repository's first commit ([`e5c732f`](https://github.com/ryder1018/skateboard-META/commit/e5c732f)) and has since been replaced file by file; two of its ideas live on in new code, depth-sorted layers (`layers.py`) and a smoothed top-edge track (`track.py`).
+SkateP grew out of an earlier prototype of mine that cut a photo into layers with a depth network and SAM 2's unlabeled masks. Its code is the repository's first commit ([`e5c732f`](https://github.com/ryder1018/skateboard-META/commit/e5c732f)) and has since been replaced file by file; two of its ideas live on in new code, depth-sorted layers (`layers.py`) and a smoothed top-edge track (`track.py`).
 
 | Built during the hackathon | |
 |---|---|
-| Perception | Muse Spark chooses what to segment per photo; SAM 3.1 segments it through the Meta Model API while DA3 runs locally (`perception.py`, `sam31_segmentation.py`, `depth.py`) |
+| Perception | Muse Spark chooses what to segment per photo and SAM 3.1 segments it (`perception.py`, `sam31_segmentation.py`); Muse Spark estimates each object's distance, checked against the ground plane (`depth_order.py`) |
 | Level design | Muse Spark surface choice, mission and occluders, each verified against the masks (`level_designer.py`); layers and track (`layers.py`, `track.py`) |
 | Tricks | Muse Spark jumps and grinds with geometric verification (`feature_designer.py`) |
 | Art | Muse Image styles and background fill, registered to the photo (`muse_image.py`) |
@@ -61,7 +62,7 @@ SkateP grew out of an earlier prototype of mine that cut a photo into layers wit
 
 ### Requirements
 
-- Linux or WSL2, Python 3.10, an NVIDIA GPU with CUDA (for Depth Anything 3)
+- Linux or WSL2 with Python 3.10+; no GPU needed
 - A [Meta Model API](https://dev.meta.ai/products/meta-model-api) key
 - `ffmpeg` and Playwright, only for rendering showcase videos
 
@@ -73,10 +74,6 @@ cd skateboard-META
 
 conda create -n skatep python=3.10 -y
 conda activate skatep
-
-# Depth Anything 3 (installed as a package, not vendored here)
-git clone https://github.com/ByteDance-Seed/Depth-Anything-3 ../Depth-Anything-3
-pip install -e ../Depth-Anything-3
 
 pip install -r wsl-cv/requirements.txt
 
@@ -142,5 +139,4 @@ The Unity game project itself is not in this repository; `unity_client/` holds t
 
 ## Credits
 
-- [Depth Anything 3](https://github.com/ByteDance-Seed/Depth-Anything-3) by ByteDance Seed, for monocular depth (see its repository for the code and model licenses).
 - [three.js](https://threejs.org/) (MIT) for the 3D showcase, loaded from a CDN.
