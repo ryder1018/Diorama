@@ -254,6 +254,8 @@ const params = new URLSearchParams(location.search);
 const CAPTURE = params.has("capture");
 if (CAPTURE) document.body.classList.add("capture");
 if (params.get("ui") === "0") document.body.classList.add("hide-ui");
+// ?cam=front: the ride is filmed head-on with the whole photo in view (for clips).
+const FRONT_RIDE = params.get("cam") === "front";
 // F / ?fade=0: keep the foreground opaque, so the skater is fully hidden behind real objects.
 let foregroundFade = params.get("fade") !== "0";
 
@@ -1222,10 +1224,10 @@ function aimCamera(t, K, S) {
       new THREE.Vector3(cx - W * 0.1, bp.y + H * 0.12, d * 0.68),
       new THREE.Vector3(cx + W * 0.06, bp.y - H * 0.02, 0),
     ];
-    const k = ramp(t, r.t0 + 0.4, r.t0 + 2.4) * (1 - ramp(t, r.t1 - 2.6, r.t1 - 0.6));
+    const k = FRONT_RIDE ? 0 : ramp(t, r.t0 + 0.4, r.t0 + 2.4) * (1 - ramp(t, r.t1 - 2.6, r.t1 - 0.6));
     const end = ramp(t, r.t1 - 2.6, r.t1 - 0.6);
     const overview = K.overview;
-    const base = end > 0 ? overview : K.design;
+    const base = end > 0 || FRONT_RIDE ? overview : K.design;
     camPos.lerpVectors(base[0], follow[0], k);
     camTarget.lerpVectors(base[1], follow[1], k);
   }

@@ -6,7 +6,7 @@ The page's synthesized soundtrack (the same one it plays live) is rendered
 offline in the browser and muxed in as AAC; --no-audio leaves it out.
 
 Usage:
-    python scripts/render_showcase.py <showcase.html> [--out showcase.mp4] [--fps 30] [--size 1920x1080] [--style comic] [--no-audio] [--no-fade]
+    python scripts/render_showcase.py <showcase.html> [--out showcase.mp4] [--fps 30] [--size 1920x1080] [--style comic] [--no-audio] [--no-fade] [--no-ui] [--front]
 
 --style picks the Muse Image art style the level settles on after the restyle
 step (default: the first style in styles.json; 'original' keeps the photo).
@@ -37,6 +37,8 @@ def render(
     style: str | None = None,
     audio: bool = True,
     fade: bool = True,
+    ui: bool = True,
+    front: bool = False,
 ) -> str:
     from playwright.sync_api import sync_playwright
 
@@ -45,7 +47,7 @@ def render(
     if ffmpeg is None:
         raise RuntimeError("ffmpeg is not on PATH.")
 
-    url = Path(html_path).resolve().as_uri() + "?capture=1" + (f"&style={style}" if style else "") + ("" if fade else "&fade=0")
+    url = Path(html_path).resolve().as_uri() + "?capture=1" + (f"&style={style}" if style else "") + ("" if fade else "&fade=0") + ("" if ui else "&ui=0") + ("&cam=front" if front else "")
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])
         page = browser.new_page(viewport={"width": width, "height": height}, device_scale_factor=1)
@@ -115,10 +117,12 @@ def main():
     parser.add_argument("--style", default=None, help="Art style to settle on (a styles.json name or 'original')")
     parser.add_argument("--no-audio", action="store_true", help="Leave the synthesized soundtrack out")
     parser.add_argument("--no-fade", action="store_true", help="Keep the foreground opaque while the skater is behind it")
+    parser.add_argument("--no-ui", action="store_true", help="Hide the side panels and style bar (the caption stays)")
+    parser.add_argument("--front", action="store_true", help="Film the ride head-on with the whole photo in view")
     args = parser.parse_args()
     out = args.out or os.path.splitext(args.html_path)[0] + ".mp4"
     try:
-        render(args.html_path, out, args.fps, args.size, args.start, args.end, args.style, not args.no_audio, not args.no_fade)
+        render(args.html_path, out, args.fps, args.size, args.start, args.end, args.style, not args.no_audio, not args.no_fade, not args.no_ui, args.front)
     except Exception as exc:
         print(f"Render failed: {exc}", file=sys.stderr)
         sys.exit(1)

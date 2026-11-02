@@ -6,7 +6,12 @@ SkateP is an exploration of 2.5D: how much of the real world's depth can a singl
 
 To make that space playable, SkateP finds what you can ride on, draws a line across it, places jumps and grinds, and repaints the level in an art style of your choice. The level loads straight into a Unity skateboarding game on your phone.
 
-![The SkateP showcase: a street photo restyled as a comic; the skater rides the road behind a real car, which hides its legs](docs/images/ride.jpg)
+![The SkateP showcase: a desk photo restyled as a comic; the skater rides the desk mat and slips behind the real coffee mug, with a Muse Spark jump over the mouse ahead](docs/images/hero.jpg)
+
+<p align="center">
+  <img src="docs/images/ride.gif" width="600" alt="A street photo as a comic level: the skater rides the road from left to right, disappearing behind the real bus and then the white car">
+  <br><sub>One photo, played: the skater rides behind the real bus and car.</sub>
+</p>
 
 Built solo by **Ryder Wu** for the **Meta Global AI Developer Hackathon (2026)**, with SAM 3.1, Muse Spark and Muse Image through the Meta Model API.
 
