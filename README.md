@@ -6,7 +6,7 @@ SkateP is an exploration of 2.5D: how much of the real world's depth can a singl
 
 To make that space playable, SkateP finds what you can ride on, draws a line across it, places jumps and grinds, and repaints the level in an art style of your choice. The level loads straight into a Unity skateboarding game on your phone.
 
-![The SkateP showcase: a desk photo restyled as a comic, with the track, a Muse Spark jump over the mug, and the skater passing behind the headset](docs/images/ride.jpg)
+![The SkateP showcase: a street photo restyled as a comic; the skater rides the road behind a real car, which hides its legs](docs/images/ride.jpg)
 
 Built solo by **Ryder Wu** for the **Meta Global AI Developer Hackathon (2026)**, with SAM 3.1, Muse Spark and Muse Image through the Meta Model API.
 
@@ -27,8 +27,9 @@ photo ─► Muse Spark ─► SAM 3.1 ─► Muse Spark ─► Muse Spark ─�
 
 <table>
 <tr>
-<td width="50%"><img src="docs/images/layers.jpg" alt="The photo split into foreground, gameplay and background layers"><br><sub>Depth-sorted 2.5D layers: the skater rides between them.</sub></td>
-<td width="50%"><img src="docs/images/tricks.jpg" alt="Muse Spark proposes two grinds, both verified against the SAM 3.1 masks"><br><sub>Muse Spark's trick proposals, verified against the SAM 3.1 masks.</sub></td>
+<td width="33%"><img src="docs/images/depth.jpg" alt="Every SAM 3.1 object raised to the distance Muse Spark estimated, labelled in meters"><br><sub>Muse Spark's distance for every object, in meters.</sub></td>
+<td width="33%"><img src="docs/images/layers.jpg" alt="The photo split into foreground, gameplay and background planes"><br><sub>Depth-sorted 2.5D planes: the skater rides between them.</sub></td>
+<td width="33%"><img src="docs/images/tricks.jpg" alt="Muse Spark proposes two grinds, both verified against the SAM 3.1 masks"><br><sub>Muse Spark's tricks, verified against the SAM 3.1 masks.</sub></td>
 </tr>
 </table>
 

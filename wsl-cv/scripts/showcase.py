@@ -20,6 +20,9 @@ from typing import Any
 
 import cv2
 import numpy as np
+import scipy.ndimage
+
+from layers import assign_layers, edge_seam
 
 TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "showcase_template.html")
 DATA_PLACEHOLDER = "__SHOWCASE_DATA__"
@@ -63,6 +66,67 @@ def _depth_assets(depth16: np.ndarray, size: tuple[int, int]) -> tuple[str, str]
     disp = cv2.resize(near_u8, (disp_w, disp_h), interpolation=cv2.INTER_AREA)
     disp = cv2.GaussianBlur(disp, (0, 0), 2.0)
     return _jpeg(color), _data_url(disp, ".png")
+
+
+# Parallax planes: each depth layer is split where Muse Spark's distances jump,
+# so the 3D page shows more than three planes (Unity still gets three layers).
+PLANE_LAYERS = ("foreground", "gameplay", "background")  # layers.py's near, mid, far
+PLANE_BANDS = {"foreground": (2.6, 1.3), "gameplay": (0.0, -0.9), "background": (-2.0, -3.4)}  # nearest, farthest z
+PLANE_BASE_Z = {"foreground": 1.9, "gameplay": 0.0, "background": -2.6}
+# The background stays one opaque plane: splitting it would draw its nearer parts twice.
+MAX_PLANES = {"foreground": 2, "gameplay": 2, "background": 1}
+MIN_PLANE_GAP = 0.15  # in log meters: a jump of about 16 % starts a new plane
+
+
+def _planes(labels: np.ndarray, meters: dict[int, float], objects: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Split each layer into planes at its biggest jumps in distance.
+
+    Returns an index map (PNG; red = background plane, green = gameplay,
+    blue = foreground, numbered from 1 = nearest) and each plane's z in the
+    page's layer units (the layer's band, placed by log distance).
+    """
+    if not meters:
+        return None
+    seamed = labels.astype(np.int32)
+    seamed[edge_seam(seamed)] = -1
+    layer_of = assign_layers(seamed, meters)
+    names = {o["label_id"]: o["id"] for o in objects if o.get("label_id") is not None}
+    far = max(meters.values())
+    index = np.zeros(labels.shape + (3,), np.uint8)  # BGR: channel i = PLANE_LAYERS[i]
+    planes = []
+    for channel, layer in enumerate(PLANE_LAYERS):
+        regions = sorted((r for r, l in layer_of.items() if l == channel), key=lambda r: meters.get(r, far))
+        if not regions:
+            continue
+        logd = np.log([max(meters.get(r, far), 0.05) for r in regions])
+        gaps = np.diff(logd)
+        cuts = sorted(int(i) for i in np.argsort(gaps)[::-1][: MAX_PLANES[layer] - 1] if gaps[i] >= MIN_PLANE_GAP)
+        groups = np.split(np.arange(len(regions)), [c + 1 for c in cuts])
+        near_z, far_z = PLANE_BANDS[layer]
+        for number, members in enumerate(groups, start=1):
+            depth = float(logd[members].mean())
+            if len(groups) == 1 or logd[-1] == logd[0]:
+                z = PLANE_BASE_Z[layer]
+            else:
+                z = near_z + (far_z - near_z) * (depth - logd[0]) / (logd[-1] - logd[0])
+            group = [regions[i] for i in members]
+            index[..., channel][np.isin(seamed, group)] = number
+            planes.append(
+                {
+                    "layer": layer,
+                    "plane": number,
+                    "z": round(z, 3),
+                    "meters": [round(float(np.exp(logd[members].min())), 2), round(float(np.exp(logd[members].max())), 2)],
+                    "names": [names.get(r, "rest of the photo") for r in group],
+                }
+            )
+        # Every pixel of the layer image (its soft edges, the filled background)
+        # belongs to the plane of the nearest region in that layer.
+        empty = index[..., channel] == 0
+        if empty.any() and not empty.all():
+            nearest = scipy.ndimage.distance_transform_edt(empty, return_distances=False, return_indices=True)
+            index[..., channel] = index[..., channel][nearest[0], nearest[1]]
+    return {"map": _data_url(index, ".png"), "list": planes}
 
 
 def _sam_assets(
@@ -187,6 +251,7 @@ def build_showcase(image_path: str, inference_dir: str, send2unity_dir: str, out
 
     depth_color, depth_disp = _depth_assets(depth16, (width, height))
     sam_overlay, anchors = _sam_assets(image_bgr, labels, objects, meters)
+    planes = _planes(labels, meters, objects)
 
     meta = track.get("level") or {}
     level = {
@@ -223,6 +288,7 @@ def build_showcase(image_path: str, inference_dir: str, send2unity_dir: str, out
         "styles": _style_assets(send2unity_dir),
         "background": (_load_json(os.path.join(send2unity_dir, "background.json")) or {}).get("source", "inpaint"),
         "objects": anchors,
+        "planes": planes,
         "level": level,
         "attempts": [
             {

@@ -42,7 +42,10 @@ def assign_layers(labels: np.ndarray, distances: dict[int, float], count: int = 
     """Layer index (0 = near) for every region id >= 0: the regions split into thirds by distance.
 
     Regions at the same distance stay together; one that sits exactly on a
-    cut (two objects side by side, say) goes to the nearer layer.
+    cut (two objects side by side, say) goes to the nearer layer. Region 0,
+    whatever SAM 3.1 did not segment, mixes near and far things (sky, signs,
+    walls), so it stays on the middle layer: behind the skater, in front of
+    the filled background.
     """
     ids = [int(i) for i in np.unique(labels) if i >= 0]
     if len(ids) <= 1:
@@ -51,7 +54,10 @@ def assign_layers(labels: np.ndarray, distances: dict[int, float], count: int = 
     meters = np.array([distances.get(i, far) for i in ids], dtype=np.float64)
     cuts = np.quantile(meters, [k / count for k in range(1, count)])
     layer = np.minimum(np.searchsorted(cuts, meters, side="left"), count - 1)
-    return dict(zip(ids, layer.tolist()))
+    assigned = dict(zip(ids, layer.tolist()))
+    if 0 in assigned:
+        assigned[0] = count // 2
+    return assigned
 
 
 def guess_ground(labels: np.ndarray) -> list[int]:
