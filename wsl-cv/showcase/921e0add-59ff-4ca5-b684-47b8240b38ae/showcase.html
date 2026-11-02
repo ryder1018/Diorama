@@ -33,6 +33,11 @@
   .brand { top: 28px; left: 32px; }
   .brand h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
   .brand h1 span { color: var(--lime); }
+  .brand .home { color: inherit; text-decoration: none; display: inline-flex; align-items: center; }
+  .brand .home::before { content: "←"; width: 0; overflow: hidden; opacity: 0; color: var(--lime); font-size: 22px; transition: width 0.18s, opacity 0.18s, margin 0.18s; }
+  .brand .home:hover::before, .brand .home:focus-visible::before { width: 22px; margin-right: 6px; opacity: 1; }
+  .brand .home:focus-visible { outline: 2px solid var(--lime); outline-offset: 4px; border-radius: 6px; }
+  body.capture .brand .home { pointer-events: none; }
   .brand p { margin: 4px 0 0; color: var(--muted); font-size: 13px; font-family: var(--mono); }
 
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
@@ -139,7 +144,7 @@
 <div id="labels"></div>
 
 <div class="ui brand">
-  <h1><span>D</span>iorama</h1>
+  <a class="home" id="home" href="../index.html" title="All levels"><h1><span>D</span>iorama</h1></a>
   <p>one photo → playable 2.5D skate level</p>
 </div>
 
@@ -254,6 +259,12 @@ const params = new URLSearchParams(location.search);
 const CAPTURE = params.has("capture");
 if (CAPTURE) document.body.classList.add("capture");
 if (params.get("ui") === "0") document.body.classList.add("hide-ui");
+// The title leads back to the gallery; back() keeps its scroll position when we came from it.
+document.getElementById("home").addEventListener("click", (e) => {
+  const gallery = new URL("../index.html", location.href).href;
+  const from = document.referrer.split(/[?#]/)[0];
+  if ((from === gallery || from === new URL("./", gallery).href) && history.length > 1) { e.preventDefault(); history.back(); }
+});
 // ?cam=front: the ride is filmed head-on with the whole photo in view (for clips).
 const FRONT_RIDE = params.get("cam") === "front";
 // F / ?fade=0: keep the foreground opaque, so the skater is fully hidden behind real objects.

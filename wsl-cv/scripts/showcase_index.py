@@ -124,6 +124,14 @@ def build_index(showcase_dir: str) -> str:
 <main class="grid">
 {chr(10).join(cards) if cards else '<p class="empty">No showcases yet. Drop photos into photos/ and run ./run_photos.sh</p>'}
 </main>
+<script>
+// Come back to the same spot after a showcase's title leads here.
+try {{
+  const y = Number(sessionStorage.getItem("galleryScroll"));
+  if (y) addEventListener("load", () => scrollTo(0, y));
+  addEventListener("scroll", () => sessionStorage.setItem("galleryScroll", String(scrollY)), {{ passive: true }});
+}} catch (e) {{}}
+</script>
 </body>
 </html>
 """
