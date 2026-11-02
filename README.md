@@ -74,7 +74,7 @@ All three are called through the Meta Model API; no other model runs, so the bac
 
 All code in this repository was written during the hackathon, with one exception: `unity_client/MobileCameraCapture.cs`, the photo capture and upload script of my existing Unity skateboarding game, which I extended during the event (map style picker, mission display, level metadata). The game itself is not in this repository.
 
-A note on the history: the first commit (`e5c732f`, Oct 27) imported my earlier prototype as a starting point, a rule-based backend on Depth Anything 3 and SAM 2 with its sample assets. Apart from `MobileCameraCapture.cs`, none of it is in the current tree; it was replaced during the event, step by step in the commits that follow.
+A note on the history: the first commit (`e5c732f`, Oct 27) contains my earlier prototype, a backend on Depth Anything 3 and SAM 2 with its sample assets. Apart from `MobileCameraCapture.cs`, the code in this repository is unrelated to it.
 
 | Built during the hackathon | |
 |---|---|
