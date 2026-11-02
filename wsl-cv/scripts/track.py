@@ -42,10 +42,16 @@ def smooth_line(
     simplify_px: float = 18.0,
     spacing_px: float = 18.0,
     top_margin_px: float = 80.0,
+    gap_px: int = 81,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Pixel x, y of the smoothed line, one point every `spacing_px`."""
     width = edge.size
     columns = np.arange(width, dtype=np.float64)
+    # Something thin and unsegmented (a wire, a pole) can cut the ground mask,
+    # so a few columns drop far below their neighbours; the spline would ring
+    # along the whole line around such a dip, so dips narrower than about
+    # gap_px / 2 go first.
+    edge = scipy.ndimage.median_filter(edge, size=min(gap_px, width), mode="nearest")
     slope = np.polyval(np.polyfit(columns, edge, 1), columns)
     line = (1 - slope_weight) * scipy.ndimage.gaussian_filter1d(edge, sigma) + slope_weight * slope
 
