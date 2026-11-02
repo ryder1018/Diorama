@@ -15,6 +15,8 @@ Skateboarding is its first application: the scene becomes a playable level where
 
 Built solo by **Ryder Wu** for the **Meta Global AI Developer Hackathon (2026)**, with SAM 3.1, Muse Spark and Muse Image through the Meta Model API.
 
+**Live demo: [ryder1018.github.io/Diorama](https://ryder1018.github.io/Diorama/)**, the 3D replay of every sample level, in the browser with no API key or install.
+
 ## The 2.5D scene
 
 | Output | What it holds |
@@ -93,8 +95,8 @@ All code in this repository was written during the hackathon, with one exception
 ### Installation
 
 ```bash
-git clone https://github.com/ryder1018/skateboard-META.git
-cd skateboard-META
+git clone https://github.com/ryder1018/Diorama.git
+cd Diorama
 
 conda create -n diorama python=3.10 -y
 conda activate diorama
@@ -156,6 +158,7 @@ wsl-cv/            CV backend (Python): pipeline, FastAPI server, showcase
 win-server/        Windows gateway between the phone and WSL (Flask)
 unity_client/      Unity scripts for capture, upload, style picker and smoke test
 docs/              architecture notes and README images
+.github/workflows/ deploys wsl-cv/showcase/ as the live demo (GitHub Pages)
 setup.md           running the full phone → gateway → backend loop
 ```
 
