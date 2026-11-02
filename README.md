@@ -1,10 +1,10 @@
 # SkateP
 
-**Turn any photo into a playable 2.5D skate level.**
+**A 2.5D scene agent: one photo in, a layered scene you can move through.**
 
-SkateP gives a single photo a sense of depth. It splits the picture into 2.5D layers, so your character skates *between* the real objects in your shot, behind a chair or a passing car, like AR on an ordinary screen.
+SkateP turns a single photo into a 2.5D scene: depth-ordered layers, each object's distance, the ground a character can stand on, and which real objects hide what. Meta's models do the reasoning, and every decision is checked against the image itself, so the scene holds together geometrically, not just visually.
 
-To make that space playable, SkateP finds what you can ride on, draws a line across it, places jumps and grinds, and repaints the level in an art style of your choice. The level loads straight into a Unity skateboarding game on your phone.
+Skateboarding is its first application: the scene becomes a playable level where the skater rides the real ground and slips behind the real objects in the shot, like AR on an ordinary screen.
 
 ![The SkateP showcase: a desk photo restyled as a comic; the skater rides the desk mat and slips behind the real coffee mug, with a Muse Spark jump over the mouse ahead](docs/images/hero.jpg)
 
@@ -15,36 +15,56 @@ To make that space playable, SkateP finds what you can ride on, draws a line acr
 
 Built solo by **Ryder Wu** for the **Meta Global AI Developer Hackathon (2026)**, with SAM 3.1, Muse Spark and Muse Image through the Meta Model API.
 
-## How it works
+## The 2.5D scene
+
+| Output | What it holds |
+|---|---|
+| Layers | The photo cut into near, mid and far layers (RGBA), plus finer parallax planes for 3D views. The background behind the front layers is filled in. |
+| Depth | Every object's distance from the camera, in meters. |
+| Ground | The surface a character can stand on and the line along its top edge (`points`, 0..1 of the photo). |
+| Occlusion | The objects in front of that line, and the stretches of it they cover. |
+| Affordances | Places to jump over or grind along, each verified against the masks. |
+| Art | The same scene in five art styles, cut with the same masks. |
+
+The API returns the layers as PNGs and the ground line, occlusion and art style as JSON ([`wsl-cv/README.md`](wsl-cv/README.md#api)). Per-object distances, parallax planes and affordances are saved with each run and drive the 3D showcase.
+
+## How the agent works
 
 ```
-photo ─► Muse Spark ─► SAM 3.1 ─► Muse Spark ─► Muse Spark ─► 2.5D layers ─► Muse Spark ─► Muse Image ─► level
-         what's in     object      riding line,   distance of    near / mid /    jumps and    art style +
-         this scene?   masks       mission        each object    far             grinds       background fill
+photo ─► perceive ─► decide ─► verify ─┬─► 2.5D scene
+                       ▲               │
+                       └─── repair ◄───┘  (violations, with the reason)
 ```
 
-1. **Read the scene.** Muse Spark looks at the photo and lists the objects worth finding: what could be skated (stairs, curbs, desk mats) and what is just scenery.
-2. **Segment.** SAM 3.1 turns each concept into pixel masks.
-3. **Design the line.** Muse Spark picks the riding surface and writes the level's mission. Every proposal is checked against the masks (does the surface span the scene at ground level?) and violations are sent back for repair.
-4. **Judge the depth.** Muse Spark estimates how far each object is, in meters. The estimates are checked against the ground plane (of two objects standing on the riding surface, the one whose base is clearly lower in the photo must be nearer) and repaired the same way. The objects then split into foreground, gameplay and background layers.
-5. **Add tricks.** Muse Spark proposes jumps over objects that stand on the line and grinds along edges that follow it. Each is verified geometrically (the jump arc must clear the mask, the grind must follow the edge) or dropped. Zero tricks is an allowed answer.
-6. **Restyle.** Muse Image repaints the photo as comic, cyberpunk, snow, pixel art or watercolor, and fills in what the foreground hides. Each render is registered back onto the photo and re-cut with the original masks, so the track and occluders still line up.
+Muse Spark makes each decision, and a geometric check against SAM 3.1's masks accepts it or sends it back with the reason, up to three rounds:
+
+1. **Perceive.** Muse Spark reads the photo and lists what to look for; SAM 3.1 segments each concept into object masks.
+2. **Ground.** Muse Spark picks the surface to stand on. Check: it spans the scene at ground level.
+3. **Depth.** Muse Spark estimates each object's distance. Check: on the ground plane, an object whose base is clearly lower in the photo must be nearer. The objects then split into depth layers, and the line along the ground's top edge is traced.
+4. **Affordances.** Muse Spark proposes jumps and grinds. Check: a jump arc must clear the object's mask, a grind must follow its edge. Proposing none is allowed.
+5. **Art.** Muse Image repaints the scene and fills what the foreground hides; each render is registered back onto the photo, so the masks still fit.
 
 <table>
 <tr>
 <td width="33%"><img src="docs/images/depth.jpg" alt="Every SAM 3.1 object raised to the distance Muse Spark estimated, labelled in meters"><br><sub>Muse Spark's distance for every object, in meters.</sub></td>
-<td width="33%"><img src="docs/images/layers.jpg" alt="The photo split into foreground, gameplay and background planes"><br><sub>Depth-sorted 2.5D planes: the skater rides between them.</sub></td>
-<td width="33%"><img src="docs/images/tricks.jpg" alt="Muse Spark proposes two grinds, both verified against the SAM 3.1 masks"><br><sub>Muse Spark's tricks, verified against the SAM 3.1 masks.</sub></td>
+<td width="33%"><img src="docs/images/layers.jpg" alt="The photo split into foreground, gameplay and background planes"><br><sub>The scene as depth-sorted planes.</sub></td>
+<td width="33%"><img src="docs/images/tricks.jpg" alt="Muse Spark proposes two grinds, both verified against the SAM 3.1 masks"><br><sub>Affordances, verified against the SAM 3.1 masks.</sub></td>
 </tr>
 </table>
 
+## Applications
+
+**Built:** a skateboarding game. A Unity app on the phone sends a photo and plays the returned scene as a level: the skater rides the ground line and passes behind the occluders. A self-contained 3D page replays how each scene was built, including the jumps and grinds.
+
+**What the scene could feed:** AR-style stickers and characters that go behind real objects, parallax animation of still photos, and levels for other 2D games such as platformers.
+
 ## Meta models used
 
-| Model | Role in SkateP |
+| Model | Role |
 |---|---|
-| **SAM 3.1** | Segments the photo from text concepts into object masks; the masks drive the layers, the track and every geometric check. |
-| **Muse Spark 1.3** | Chooses what to segment, picks the riding surface, estimates each object's distance, writes the mission, and designs jumps and grinds, each inside a verify-and-repair loop against the masks. |
-| **Muse Image 1.0** | Restyles the level into five art styles and fills the background hidden behind foreground objects. |
+| **Muse Spark 1.3** | The agent's reasoning: what to segment, the ground, each object's distance, the affordances and the level's mission, each inside a verify-and-repair loop. |
+| **SAM 3.1** | Object masks from text concepts; the masks drive the layers, the line and every check. |
+| **Muse Image 1.0** | Art styles and the background hidden behind foreground objects. |
 
 All three are called through the Meta Model API; no other model runs, so the backend needs no GPU.
 
@@ -93,7 +113,7 @@ Put your API key in a `.env` file at the repository root (it is git-ignored):
 echo "MODEL_API_KEY=<your Meta Model API key>" > .env
 ```
 
-### Generate a level from a photo
+### Try it on a photo
 
 ```bash
 cd wsl-cv
