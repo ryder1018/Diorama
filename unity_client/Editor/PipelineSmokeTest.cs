@@ -8,7 +8,7 @@ using UnityEngine;
 /// Editor smoke test for the photo -> server -> level flow.
 /// Enters Play mode, uploads one photo through MobileCameraCapture with the chosen art style,
 /// waits for the result panel, starts the game and saves screenshots plus a report to
-/// Temp/PipelineSmokeTest/. Run it from Tools/SkateP, or drop a request file at
+/// Temp/PipelineSmokeTest/. Run it from Tools/Diorama, or drop a request file at
 /// Temp/pipeline_smoke_test.json: {"photo":"C:/x.jpg","style":"comic","server":"127.0.0.1"}.
 /// </summary>
 [InitializeOnLoad]
@@ -49,7 +49,7 @@ public static class PipelineSmokeTest
         EditorApplication.playModeStateChanged += OnPlayModeChanged;
     }
 
-    [MenuItem("Tools/SkateP/Pipeline Smoke Test...")]
+    [MenuItem("Tools/Diorama/Pipeline Smoke Test...")]
     private static void RunFromMenu()
     {
         string photo = EditorUtility.OpenFilePanel("Photo to upload", "", "jpg,jpeg,png");

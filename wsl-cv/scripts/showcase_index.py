@@ -86,7 +86,7 @@ def build_index(showcase_dir: str) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SkateP Levels</title>
+<title>Diorama Levels</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
 <style>
   :root {{ --bg: #06080c; --panel: #0e131c; --line: rgba(255,255,255,0.08); --text: #e9eef6; --muted: #8a94a6; --lime: #c4ff3a; }}
@@ -118,7 +118,7 @@ def build_index(showcase_dir: str) -> str:
 </head>
 <body>
 <header>
-  <h1>Skate<span>P</span> levels</h1>
+  <h1><span>D</span>iorama levels</h1>
   <p>{len(cards)} photo{'' if len(cards) == 1 else 's'} → playable 2.5D levels · open one to replay its pipeline in 3D, or pick a Muse Image art style below it</p>
 </header>
 <main class="grid">

@@ -1,6 +1,6 @@
 """Muse Spark level designer: picks the riding surface and writes the mission.
 
-The track itself keeps the original SkateP logic: it is the smoothed top edge
+The track itself keeps the original skate game's logic: it is the smoothed top edge
 of the ground surface (track.py), and every other object stays in the
 scene as an occluder or backdrop, so the skater weaves through the photo
 instead of climbing over it. Muse Spark replaces the fragile geometric guess

@@ -1,4 +1,4 @@
-"""SkateP gateway: the phone talks to this Windows server, which forwards to the WSL level API.
+"""Diorama gateway: the phone talks to this Windows server, which forwards to the WSL level API.
 
 The phone cannot reach WSL directly (it sits behind WSL's NAT), and a level
 takes a minute or two, longer than a phone request should stay open. So:
@@ -12,10 +12,10 @@ takes a minute or two, longer than a phone request should stay open. So:
 
 One level at a time: the app uploads its photos one by one and polls for each.
 
-Settings (environment variables):
-    SKATEP_API_KEY       key the app sends as X-API-KEY (default 0000)
-    SKATEP_WSL_URL       the WSL level API (default http://127.0.0.1:9000/infer)
-    SKATEP_WSL_TIMEOUT   seconds to wait for one level (default 300)
+Settings (environment variables; the older SKATEP_* names still work):
+    DIORAMA_API_KEY       key the app sends as X-API-KEY (default 0000)
+    DIORAMA_WSL_URL       the WSL level API (default http://127.0.0.1:9000/infer)
+    DIORAMA_WSL_TIMEOUT   seconds to wait for one level (default 300)
 """
 
 import os
@@ -24,9 +24,14 @@ import threading
 import requests
 from flask import Flask, jsonify, request
 
-API_KEY = os.getenv("SKATEP_API_KEY", "0000")
-WSL_URL = os.getenv("SKATEP_WSL_URL", "http://127.0.0.1:9000/infer")
-WSL_TIMEOUT = float(os.getenv("SKATEP_WSL_TIMEOUT", "300"))
+
+def _setting(name: str, default: str) -> str:
+    return os.getenv(f"DIORAMA_{name}") or os.getenv(f"SKATEP_{name}", default)
+
+
+API_KEY = _setting("API_KEY", "0000")
+WSL_URL = _setting("WSL_URL", "http://127.0.0.1:9000/infer")
+WSL_TIMEOUT = float(_setting("WSL_TIMEOUT", "300"))
 
 app = Flask(__name__)
 

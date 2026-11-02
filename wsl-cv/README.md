@@ -1,6 +1,6 @@
-# SkateP backend (`wsl-cv/`)
+# Diorama backend (`wsl-cv/`)
 
-The 2.5D scene agent: turns one photo into depth-sorted layers, a ground line, the objects that hide a character on it, verified jumps and grinds and Muse Image art styles, then plays the scene as a skate level and replays the whole run in a 3D showcase. Every model call goes to Meta's models through the Meta Model API, so it needs no GPU; installation is in the root [`README.md`](../README.md#installation). Set `MODEL_API_KEY` (or put it in the repo-root `.env`, which the scripts load).
+The verified 2.5D scene pipeline: turns one photo into depth-sorted layers, a ground line, the objects that hide a character on it, verified jumps and grinds and Muse Image art styles, then plays the scene as a skate level and replays the whole run in a 3D showcase. Every model call goes to Meta's models through the Meta Model API, so it needs no GPU; installation is in the root [`README.md`](../README.md#installation). Set `MODEL_API_KEY` (or put it in the repo-root `.env`, which the scripts load).
 
 ## Pipeline
 

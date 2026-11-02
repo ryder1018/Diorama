@@ -1,12 +1,12 @@
-# SkateP
+# Diorama
 
-**A 2.5D scene agent: one photo in, a layered scene you can move through.**
+**A verified agentic pipeline: one photo in, a layered 2.5D scene you can move through.**
 
-SkateP turns a single photo into a 2.5D scene: depth-ordered layers, each object's distance, the ground a character can stand on, and which real objects hide what. Meta's models do the reasoning, and every decision is checked against the image itself, so the scene holds together geometrically, not just visually.
+Diorama turns a single photo into a 2.5D scene: depth-ordered layers, each object's distance, the ground a character can stand on, and which real objects hide what. Meta's models do the reasoning, and every decision is checked against the image itself, so the scene holds together geometrically, not just visually.
 
 Skateboarding is its first application: the scene becomes a playable level where the skater rides the real ground and slips behind the real objects in the shot, like AR on an ordinary screen.
 
-![The SkateP showcase: a desk photo restyled as a comic; the skater rides the desk mat and slips behind the real coffee mug, with a Muse Spark jump over the mouse ahead](docs/images/hero.jpg)
+![The Diorama showcase: a desk photo restyled as a comic; the skater rides the desk mat and slips behind the real coffee mug, with a Muse Spark jump over the mouse ahead](docs/images/hero.jpg)
 
 <p align="center">
   <img src="docs/images/ride.gif" width="600" alt="A street photo as a comic level: the skater rides the road from left to right, disappearing behind the real bus and then the white car">
@@ -28,7 +28,7 @@ Built solo by **Ryder Wu** for the **Meta Global AI Developer Hackathon (2026)**
 
 The API returns the layers as PNGs and the ground line, occlusion and art style as JSON ([`wsl-cv/README.md`](wsl-cv/README.md#api)). Per-object distances, parallax planes and affordances are saved with each run and drive the 3D showcase.
 
-## How the agent works
+## How the verified pipeline works
 
 ```
 photo ─► perceive ─► decide ─► verify ─┬─► 2.5D scene
@@ -62,7 +62,7 @@ Muse Spark makes each decision, and a geometric check against SAM 3.1's masks ac
 
 | Model | Role |
 |---|---|
-| **Muse Spark 1.3** | The agent's reasoning: what to segment, the ground, each object's distance, the affordances and the level's mission, each inside a verify-and-repair loop. |
+| **Muse Spark 1.3** | Every decision in the pipeline: what to segment, the ground, each object's distance, the affordances and the level's mission, each inside a verify-and-repair loop. |
 | **SAM 3.1** | Object masks from text concepts; the masks drive the layers, the line and every check. |
 | **Muse Image 1.0** | Art styles and the background hidden behind foreground objects. |
 
@@ -96,8 +96,8 @@ All code in this repository was written during the hackathon, with one exception
 git clone https://github.com/ryder1018/skateboard-META.git
 cd skateboard-META
 
-conda create -n skatep python=3.10 -y
-conda activate skatep
+conda create -n diorama python=3.10 -y
+conda activate diorama
 
 pip install -r wsl-cv/requirements.txt
 

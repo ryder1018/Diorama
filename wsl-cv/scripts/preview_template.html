@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SkateP Picker</title>
+<title>Diorama Picker</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
 <style>
   :root { --bg: #06080c; --panel: #0e131c; --line: rgba(255,255,255,0.08); --text: #e9eef6; --muted: #8a94a6; --lime: #c4ff3a; --orange: #ff9a3a; --red: #ff5a5a; }
@@ -78,7 +78,7 @@
 <body>
 <header>
   <div class="bar">
-    <h1>Skate<span>P</span> picker</h1>
+    <h1><span>D</span>iorama picker</h1>
     <span class="count mono" id="count"></span>
     <div class="seg" id="filter">
       <button data-f="all" class="on">all</button><button data-f="picked">picked</button><button data-f="unbuilt">not built</button><button data-f="failed">failed</button>
@@ -109,7 +109,7 @@
 <script>
 const ENTRIES = __DATA__;
 const STAMP = "__STAMP__";
-const STORE = "skatep.picks";
+const STORE = "diorama.picks";
 
 const load = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
 const save = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} };
@@ -117,7 +117,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 
 const picks = new Set(load(STORE, []).filter((n) => ENTRIES.some((e) => e.name === n)));
 let filter = "all";
-let view = load("skatep.view", "track");
+let view = load("diorama.view", "track");
 let lbIndex = -1;
 
 const src = (e, file) => `${encodeURIComponent(e.name)}/preview/${file}?v=${STAMP}`;
@@ -216,7 +216,7 @@ function togglePick(name) {
 
 function setView(v) {
   view = v;
-  save("skatep.view", v);
+  save("diorama.view", v);
   renderGrid();
   if (lbIndex >= 0) renderLightbox();
 }

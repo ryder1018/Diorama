@@ -1,4 +1,4 @@
-"""SkateP level API: the Unity app (through win-server) sends a photo, gets a level back.
+"""Diorama level API: the Unity app (through win-server) sends a photo, gets a level back.
 
     GET  /health    liveness check
     POST /infer     multipart: photo (image file), style (optional art style)
@@ -49,9 +49,9 @@ DEFAULT_STYLE = os.getenv("MUSE_IMAGE_STYLE", "").strip().lower()
 NO_STYLE = {"", "none", "original", "photo"}
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-7s | %(message)s", datefmt="%H:%M:%S")
-log = logging.getLogger("skatep")
+log = logging.getLogger("diorama")
 
-app = FastAPI(title="SkateP level API", description="Photo in, playable 2.5D skate level out.")
+app = FastAPI(title="Diorama level API", description="Photo in, playable 2.5D skate level out.")
 
 
 def _b64_file(path: Path) -> str:
@@ -114,7 +114,7 @@ def infer(photo: UploadFile = File(...), style: str | None = Form(None)) -> dict
         raise HTTPException(400, "The upload is not a readable image.")
 
     started = time.perf_counter()
-    with tempfile.TemporaryDirectory(prefix="skatep-") as work, ThreadPoolExecutor(max_workers=2) as muse_image:
+    with tempfile.TemporaryDirectory(prefix="diorama-") as work, ThreadPoolExecutor(max_workers=2) as muse_image:
         work = Path(work)
         photo_path, level_dir, inference_dir = work / "photo.jpg", work / "level", work / "inference"
         cv2.imwrite(str(photo_path), image)

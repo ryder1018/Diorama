@@ -1,4 +1,4 @@
-"""SkateP pipeline: one photo in, a playable 2.5D level (and its showcase) out.
+"""Diorama pipeline: one photo in, a playable 2.5D level (and its showcase) out.
 
   1. perception.py       SAM 3.1 objects (Muse Spark picks the concepts)
   2. level_designer.py   Muse Spark picks the riding surface, verified against the masks
@@ -128,7 +128,7 @@ def run_pipeline(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Turn one photo into a SkateP level and its 3D showcase.")
+    parser = argparse.ArgumentParser(description="Turn one photo into a Diorama level and its 3D showcase.")
     parser.add_argument("image_path", help="The photo (resized in place to the working width)")
     parser.add_argument("--out_dir", default="./outputs/inference_results", help="Label map, object list and depth")
     parser.add_argument("--send2unity_dir", default="./Send2Unity", help="The level: layers, track, styles, showcase")

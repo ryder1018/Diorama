@@ -1,6 +1,6 @@
 # Architecture
 
-SkateP has three parts that run on different machines. A photo crosses all three boundaries, so read this before changing anything that one side sends to another. Setup steps are in [`setup.md`](../setup.md).
+Diorama has three parts that run on different machines. A photo crosses all three boundaries, so read this before changing anything that one side sends to another. Setup steps are in [`setup.md`](../setup.md).
 
 | Part | Runs on | Role |
 |---|---|---|
@@ -42,7 +42,7 @@ sequenceDiagram
 
 ## Contracts
 
-- **App → gateway:** `POST /upload` multipart `photo` (+ `style`), header `X-API-KEY` (`SKATEP_API_KEY`, default `0000`); `GET /download` with the same header.
+- **App → gateway:** `POST /upload` multipart `photo` (+ `style`), header `X-API-KEY` (`DIORAMA_API_KEY`, default `0000`); `GET /download` with the same header.
 - **Gateway → app:** `{"status": "processing" | "success" | "error", "images": {...}, "metadata": {...}, "message": "..."}`, deserialized by `ServerResponse` in `MobileCameraCapture.cs` and `TrackData` in `TrackModels.cs`.
 - **API → gateway:** the `/infer` response documented in [`wsl-cv/README.md`](../wsl-cv/README.md#api). The track is `metadata.points`, `[x, y]` pairs in 0..1 of the photo, left to right.
 
