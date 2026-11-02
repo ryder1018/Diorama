@@ -2,13 +2,11 @@
 
 ## Start the WSL CV API
 
-Run this in WSL. Run `uv sync` after dependency changes or on a fresh machine; it installs DA3 dependencies, FastAPI upload support, and the SAM 3.1 output parser.
-On this machine the conda env `da3_skate` already has everything, so `conda activate da3_skate` works instead of `uv sync` / `uv run`.
+Run this in WSL, in the Python env from the root [`README.md`](README.md#installation) (on the dev machine: `conda activate da3_skate`).
 
 ```bash
 cd <repo>/wsl-cv
-uv sync
-uv run python -m uvicorn scripts.infer:app --host 0.0.0.0 --port 9000
+python -m uvicorn scripts.infer:app --host 0.0.0.0 --port 9000
 ```
 
 SAM 3.1 runs through the Meta Model API. Export `MODEL_API_KEY` in the same shell before starting the server.
@@ -76,7 +74,7 @@ Replace the photo path with your real image path:
 
 ```powershell
 curl.exe -X POST "http://127.0.0.1:5000/upload" `
-  -H "X-API-KEY: 112550191" `
+  -H "X-API-KEY: 0000" `
   -F "photo=@C:\2026_Spring\sp25test\scenery.jpg;type=image/jpeg" `
   -F "style=comic"
 ```
@@ -96,7 +94,7 @@ This matches what `MobileCameraCapture.cs` does after upload:
 
 ```powershell
 curl.exe "http://127.0.0.1:5000/download" `
-  -H "X-API-KEY: 112550191" `
+  -H "X-API-KEY: 0000" `
   -o result.json
 ```
 

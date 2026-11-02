@@ -43,7 +43,7 @@ public class MobileCameraCapture : MonoBehaviour
     [Tooltip("Used when there is no saved IP in PlayerPrefs.")]
     public string defaultServerIP = "192.168.1.100";
     public string port = "5000";
-    private string apiKey = "112550191";
+    private string apiKey = "0000";
 
     [Header("Polling Settings")]
     public float pollingInterval = 3.0f;

@@ -4,13 +4,8 @@ This module handles the computer vision pipeline for the SkateP project. It rece
 
 ## 1. Environment Setup & Execution
 
-We use `uv` for dependency management.
-
 ### Installation
-```bash
-# Inside the wsl-cv directory
-uv sync
-```
+See the Installation section of the root [`README.md`](../README.md) (conda + pip, with Depth Anything 3 installed as a package).
 
 SAM 3.1 runs through the Meta Model API, so no SAM weights are downloaded. Set your API key before starting the server:
 
@@ -18,18 +13,18 @@ SAM 3.1 runs through the Meta Model API, so no SAM weights are downloaded. Set y
 export MODEL_API_KEY=<your Meta Model API key>
 ```
 
-`uv sync` installs `meta-sam-parser`, Meta's decoder for SAM 3.1 box/mask output.
+`requirements.txt` includes `meta-sam-parser`, Meta's decoder for SAM 3.1 box/mask output.
 
 ### Running the API Server
 Start the FastAPI backend server:
 ```bash
-uv run uvicorn scripts.infer:app --host 0.0.0.0 --port 9000
+uvicorn scripts.infer:app --host 0.0.0.0 --port 9000
 ```
 Outputs and temporary job directories (`_jobs/`) are managed automatically during API execution.
 
 ### Running Scripts Manually
 ```bash
-uv run python scripts/pipeline.py ./assets/pictures/cup.jpg
+python scripts/pipeline.py ./assets/pictures/cup.jpg
 ```
 Intermediate outputs will be saved to `outputs/` and `Send2Unity/`.
 

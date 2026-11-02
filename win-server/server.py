@@ -5,8 +5,8 @@ import threading
 
 app = Flask(__name__)
 
-# 簡易驗證金鑰 (在學校網路建議加上)
-API_KEY = "112550191"
+# Shared key the Unity app sends as X-API-KEY (override with SKATEP_API_KEY).
+API_KEY = os.getenv("SKATEP_API_KEY", "0000")
 
 # WSL API configuration
 WSL_API_URL = "http://127.0.0.1:9000/infer"
