@@ -1,135 +1,60 @@
-# Set Up Whole Project
+# Running the phone → gateway → backend loop
 
-## Start the WSL CV API
+The Unity app on a phone talks to a small gateway on the Windows PC, which forwards each photo to the level API in WSL:
 
-Run this in WSL, in the Python env from the root [`README.md`](README.md#installation) (on the dev machine: `conda activate da3_skate`).
+```
+Unity app ──► win-server/server.py (Windows, :5000) ──► wsl-cv/scripts/infer.py (WSL, :9000)
+```
+
+## 1. Level API (WSL)
+
+In the Python env from the root [`README.md`](README.md#installation), with `MODEL_API_KEY` set (or in the repo-root `.env`):
 
 ```bash
-cd <repo>/wsl-cv
-python -m uvicorn scripts.infer:app --host 0.0.0.0 --port 9000
+cd wsl-cv
+set -a; . ../.env; set +a        # if the key is in .env
+uvicorn scripts.infer:app --host 0.0.0.0 --port 9000
 ```
 
-SAM 3.1 runs through the Meta Model API. Export `MODEL_API_KEY` in the same shell before starting the server.
+From Windows, `curl.exe http://127.0.0.1:9000/health` should answer `{"status":"ok",...}`. If it does not, WSL's localhost forwarding is off; use the WSL address (`hostname -I` in WSL) as `SKATEP_WSL_URL` below.
 
-Check that Windows can reach the WSL API:
+## 2. Gateway (Windows)
+
+The gateway needs Python with `flask` and `requests`:
 
 ```powershell
-curl.exe http://127.0.0.1:9000/health
-```
-
-Expected response:
-
-```json
-{"status":"ok","timestamp":"..."}
-```
-
-If this does not work from Windows, get the WSL IP in WSL:
-
-```bash
-hostname -I
-```
-
-Then update `win-server/server.py`:
-
-```python
-WSL_API_URL = "http://<WSL_IP>:9000/infer"
-```
-
-If `127.0.0.1` works, keep the default:
-
-```python
-WSL_API_URL = "http://127.0.0.1:9000/infer"
-```
-
-## Start the Windows Gateway
-
-Run this in PowerShell from the `win-server` directory:
-
-```powershell
-cd C:\path\to\SkateboardP\win-server
-.\venv\Scripts\Activate.ps1
+cd win-server
+pip install flask requests
 python server.py
 ```
 
-The gateway listens on port `5000`. Unity sends requests to this server, not directly to WSL.
-The venv needs `flask` and `requests` (`pip install flask requests`).
+It listens on port 5000. Settings are environment variables:
 
-For Unity Editor testing on this PC only, the gateway can also run in WSL (the `da3_skate` env has Flask);
-Windows reaches it at `127.0.0.1:5000` through WSL's localhost forwarding:
+| Variable | Default | |
+|---|---|---|
+| `SKATEP_API_KEY` | `0000` | must match `apiKey` in `MobileCameraCapture.cs` |
+| `SKATEP_WSL_URL` | `http://127.0.0.1:9000/infer` | the level API |
+| `SKATEP_WSL_TIMEOUT` | `300` | seconds to wait for one level |
 
-```bash
-cd win-server && python server.py
-```
+For a phone, allow inbound TCP 5000 in Windows Firewall and enter the PC's Wi-Fi IPv4 address (`ipconfig`) in the app's Change IP box. A phone cannot reach a gateway running inside WSL (NAT), but for Unity Editor tests on the same PC the gateway can also run in WSL (`cd win-server && python server.py`).
 
-An Android phone cannot reach a gateway inside WSL (NAT networking), so for the phone run it on Windows, allow
-inbound TCP 5000 in Windows Firewall, and enter the PC's Wi-Fi IPv4 address (`ipconfig`) in the app's Change IP box.
+## 3. Try the upload flow by hand
 
-## Test the Unity-Style Upload Flow
-
-Run these in PowerShell after both servers are running.
-
-### 1. Upload one photo
-
-Replace the photo path with your real image path:
+This is what the app does: upload, then poll until the level is ready (about a minute).
 
 ```powershell
-curl.exe -X POST "http://127.0.0.1:5000/upload" `
-  -H "X-API-KEY: 0000" `
-  -F "photo=@C:\2026_Spring\sp25test\scenery.jpg;type=image/jpeg" `
-  -F "style=comic"
+curl.exe -X POST http://127.0.0.1:5000/upload -H "X-API-KEY: 0000" -F "photo=@C:\path\to\photo.jpg;type=image/jpeg" -F "style=comic"
+# {"status":"accepted"}
+
+curl.exe http://127.0.0.1:5000/download -H "X-API-KEY: 0000" -o result.json
+# {"status":"processing"} until it becomes {"status":"success","images":{...},"metadata":{...}}
 ```
 
-`style` is optional: `original`, `comic`, `cyberpunk`, `snow`, `pixel` or `watercolor` (the Unity map style
-picker sends it). Without it the WSL server uses `$MUSE_IMAGE_STYLE`, or the photo's own pixels.
+`style` is optional: `original`, `comic`, `cyberpunk`, `snow`, `pixel` or `watercolor` (the app's map style picker sends it). A failed level answers `{"status":"error","message":"..."}`. The response format is documented in [`wsl-cv/README.md`](wsl-cv/README.md#api).
 
-Expected immediate response:
+## 4. Unity Editor smoke test
 
-```json
-{"status":"accepted"}
-```
-
-### 2. Poll for the result
-
-This matches what `MobileCameraCapture.cs` does after upload:
-
-```powershell
-curl.exe "http://127.0.0.1:5000/download" `
-  -H "X-API-KEY: 0000" `
-  -o result.json
-```
-
-If `result.json` contains:
-
-```json
-{"status":"processing"}
-```
-
-wait a few seconds and run the download command again.
-
-When processing succeeds, `result.json` should contain:
-
-```json
-{
-  "status": "success",
-  "images": {
-    "preview_base64": "...",
-    "foreground_base64": "...",
-    "gameplay_base64": "...",
-    "background_base64": "..."
-  },
-  "metadata": {
-    "points": []
-  }
-}
-```
-
-## Unity Editor Smoke Test
-
-With the WSL API and the gateway running and `Parallax.unity` open in the Editor, use
-**Tools > SkateP > Pipeline Smoke Test...** and pick a photo. It enters Play mode, uploads the photo through
-`MobileCameraCapture` with the style selected in the picker, waits for the result panel, presses Start Game,
-checks that the level in play is the generated one, and writes screenshots plus `report.txt` to
-`Temp/PipelineSmokeTest/` in the Unity project. It skips `LocalLevelTester`'s baked levels for that run.
+With the API and the gateway running and `Parallax.unity` open, **Tools > SkateP > Pipeline Smoke Test...** picks a photo, enters Play mode, uploads it through `MobileCameraCapture` with the style chosen in the picker, waits for the result panel, presses Start Game, checks that the generated level is the one in play, and writes screenshots and `report.txt` to `Temp/PipelineSmokeTest/` in the Unity project (`LocalLevelTester`'s baked levels are skipped for that run).
 
 It can also be started without touching the Editor by writing `Temp/pipeline_smoke_test.json` in the Unity project:
 
@@ -138,13 +63,3 @@ It can also be started without touching the Editor by writing `Temp/pipeline_smo
 ```
 
 An empty `Temp/pipeline_smoke_refresh` file makes the Editor re-import scripts edited outside Unity.
-
-## Optional: Test WSL Directly
-
-This bypasses `win-server`, so it is not the exact Unity flow. Use it only to check whether `wsl-cv/scripts/infer.py` works by itself.
-
-```powershell
-curl.exe -X POST "http://127.0.0.1:9000/infer" `
-  -F "photo=@C:\2026_Spring\sp25test\scenery.jpg;type=image/jpeg" `
-  -o result.json
-```

@@ -1,762 +1,188 @@
+"""SkateP level API: the Unity app (through win-server) sends a photo, gets a level back.
+
+    GET  /health    liveness check
+    POST /infer     multipart: photo (image file), style (optional art style)
+
+Response:
+    images.preview_base64      PNG: the three layers composited, track drawn on top
+    images.foreground_base64   PNG: near layer (drawn in front of the skater)
+    images.gameplay_base64     PNG: mid layer
+    images.background_base64   PNG: far layer
+    metadata                   track_points.json: points, track_color, level
+                               (mission, surfaces, occluders), art_style
+
+Each request works in its own temporary folder, so requests never see each
+other's files. A requested art style starts in Muse Image as soon as the photo
+arrives and runs alongside depth, segmentation and level design; without one,
+Muse Image fills the background behind the front layers while the track is
+traced.
+
+Run from wsl-cv/:
+    uvicorn scripts.infer:app --host 0.0.0.0 --port 9000
 """
-infer.py - FastAPI backend for the SkateP depth-to-track pipeline.
-
-Exposes:
-    GET  /health   - liveness check
-    POST /infer    - accept an image, run the 3-step pipeline, return results
-
-Run with:
-    uvicorn infer:app --host 0.0.0.0 --port 9000
-"""
-
-from __future__ import annotations
 
 import base64
-import json
+import io
 import logging
 import os
-import shutil
-import subprocess
 import sys
-import uuid
-from concurrent.futures import ThreadPoolExecutor
+import tempfile
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
-from io import BytesIO
 from pathlib import Path
-from threading import Lock
 from typing import Any
 
 import cv2
+import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
 from PIL import Image, ImageDraw
 
-Path("/tmp/skatep-matplotlib").mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("MPLCONFIGDIR", "/tmp/skatep-matplotlib")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-_SCRIPTS_ROOT = Path(__file__).resolve().parent
-if str(_SCRIPTS_ROOT) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_ROOT))
+from layers import LAYER_FILES  # noqa: E402
+from muse_image import STYLES, fill_enabled, fill_photo_background, front_objects, load_setting, prefetch_style, stylize_run  # noqa: E402
+from perception import OUTPUT_WIDTH, fit_width, output_paths  # noqa: E402
+from pipeline import build_level  # noqa: E402
 
-from level_designer import finalize_level, plan_track, repair_track_occlusions
-from muse_image import STYLES, fill_enabled, fill_photo_background, front_objects, load_setting, prefetch_style, stylize_run
-from run_inference_depth_sam31 import _resize_to_width, run_inference
+DEFAULT_STYLE = os.getenv("MUSE_IMAGE_STYLE", "").strip().lower()
+NO_STYLE = {"", "none", "original", "photo"}
 
-# ======================================================================
-# PIPELINE CONFIGURATION
-# Adjust paths / filenames here to match your environment.
-# ======================================================================
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-7s | %(message)s", datefmt="%H:%M:%S")
+log = logging.getLogger("skatep")
 
-
-class PipelineConfig:
-    """Central place for every tuneable path and filename."""
-
-    # Root of the workspace (where models/, assets/ live)
-    WORKSPACE_ROOT: Path = Path(__file__).resolve().parent.parent
-
-    # Where the scripts live
-    SCRIPTS_ROOT: Path = _SCRIPTS_ROOT
-    # Python interpreter used to call sub-scripts (same venv).
-    PYTHON: str = sys.executable
-
-    # -- Pipeline script paths (relative to SCRIPTS_ROOT) --
-    STEP1_SCRIPT: str = "run_inference_depth_sam31.py"
-    STEP1_HELPER_SCRIPT: str = "sam31_segmentation.py"
-    STEP2_SCRIPT: str = "cut_img.py"
-    STEP3_SCRIPT: str = "extract_track.py"
-
-    # -- Temporary job directory root --
-    JOBS_ROOT: Path = WORKSPACE_ROOT / "_jobs"
-
-    # -- Timeout per pipeline step (seconds) --
-    STEP2_TIMEOUT: int = 120
-    STEP3_TIMEOUT: int = 60
-
-    # -- Step 1 model settings --
-    DEPTH_MODEL_NAME: str = os.getenv("DA3_MODEL_NAME", "depth-anything/da3-small")
-    OUTPUT_WIDTH: int = int(os.getenv("PIPELINE_OUTPUT_WIDTH", "1024"))
-    INFERENCE_WIDTH: int = int(os.getenv("PIPELINE_INFERENCE_WIDTH", "768"))
-    DEPTH_INPUT_SIZE: int = int(os.getenv("DA3_INPUT_SIZE", str(INFERENCE_WIDTH)))
-
-    # -- Input filename written inside each job directory --
-    # The legacy scripts derive the "base_name" from the file stem,
-    # so we use a fixed name that is safe and predictable.
-    INPUT_FILENAME: str = "input.jpg"
-
-    # -- Step 1 outputs (written to <job>/outputs/inference_results/) --
-    # Pattern: {base_name}_depth_16bit.png  /  {base_name}_depth_mask.npy
-    # base_name is derived from INPUT_FILENAME stem -> "input"
-    DEPTH_16BIT_FILENAME: str = "input_depth_16bit.png"
-    DEPTH_MASK_FILENAME: str = "input_depth_mask.npy"
-    SAM31_OBJECTS_FILENAME: str = "input_sam31_objects.json"
-
-    # -- Step 2 outputs (written to <job>/Send2Unity/) --
-    # TODO: ADAPT THESE OUTPUT FILENAMES TO YOUR CURRENT PIPELINE
-    # cut_img.py produces merged_layer_01.png ... merged_layer_03.png
-    # Mapping:  layer 01 = nearest (foreground)
-    #           layer 02 = middle  (gameplay)
-    #           layer 03 = farthest (background, inpainted)
-    FOREGROUND_FILENAME: str = "merged_layer_01.png"
-    GAMEPLAY_FILENAME: str = "merged_layer_02.png"
-    BACKGROUND_FILENAME: str = "merged_layer_03.png"
-    LAYER_MASK_FILENAME: str = "layer_00_mask.npy"
-
-    # -- Step 3 outputs (written to <job>/Send2Unity/) --
-    # TODO: ADAPT THESE OUTPUT FILENAMES TO YOUR CURRENT PIPELINE
-    TRACK_JSON_FILENAME: str = "track_points.json"
-
-    # -- Step 4: Muse Image art style for the returned layers --
-    # Empty = the photo's own pixels (no Muse Image call). A request's
-    # `style` form field overrides it; see muse_image.STYLES for names.
-    DEFAULT_STYLE: str = os.getenv("MUSE_IMAGE_STYLE", "").strip().lower()
+app = FastAPI(title="SkateP level API", description="Photo in, playable 2.5D skate level out.")
 
 
-CFG = PipelineConfig()
-
-# ======================================================================
-# LOGGING
-# ======================================================================
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-7s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger("infer")
-step1_lock = Lock()
-
-# ======================================================================
-# FASTAPI APP
-# ======================================================================
-
-app = FastAPI(
-    title="SkateP Depth Pipeline API",
-    version="1.0.0",
-    description="Accepts an image and returns depth-layered PNGs + track metadata.",
-)
-
-# ======================================================================
-# HELPER FUNCTIONS
-# ======================================================================
+def _b64_file(path: Path) -> str:
+    return base64.b64encode(path.read_bytes()).decode("ascii")
 
 
-def _create_job_dir() -> Path:
-    """Create a unique per-request working directory.
-
-    Format: _jobs/<timestamp>_<short-uuid>/
-    """
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    tag = uuid.uuid4().hex[:8]
-    job_dir = CFG.JOBS_ROOT / f"{ts}_{tag}"
-    job_dir.mkdir(parents=True, exist_ok=True)
-    logger.info("Created job directory: %s", job_dir)
-    return job_dir
-
-
-async def save_upload_file(upload: UploadFile, dest: Path) -> None:
-    """Stream an uploaded file to *dest* on disk."""
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    contents = await upload.read()
-    if not contents:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-    dest.write_bytes(contents)
-    logger.info("Saved uploaded file -> %s (%d bytes)", dest, len(contents))
-
-
-def run_command(
-    cmd: list[str],
-    *,
-    cwd: Path,
-    timeout: int,
-    step_label: str,
-    env: dict[str, str] | None = None,
-) -> None:
-    """Execute a subprocess; raise HTTP 500 on failure or timeout.
-
-    Parameters
-    ----------
-    cmd:
-        Command tokens, e.g. ["python", "run_inference_depth_sam31.py"].
-    cwd:
-        Working directory for the child process.
-    timeout:
-        Max seconds before the process is killed.
-    step_label:
-        Human-readable label used in log / error messages.
-    env:
-        Optional extra environment variables merged with os.environ.
-    """
-    full_env = {**os.environ, **(env or {})}
-    logger.info(
-        "[%s] Running: %s  (cwd=%s, timeout=%ds)",
-        step_label,
-        " ".join(cmd),
-        cwd,
-        timeout,
-    )
-
+def preview_png(layer_paths: list[Path], points: list[list[float]], max_side: int = 768) -> str:
+    """The layers composited far to near with the track on top, as base64 PNG ("" on failure)."""
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=str(cwd),
-            env=full_env,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        logger.error("[%s] TIMEOUT after %ds", step_label, timeout)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Pipeline step '{step_label}' timed out after {timeout}s.",
-        ) from exc
-    except Exception as exc:
-        logger.exception("[%s] Unexpected error", step_label)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Pipeline step '{step_label}' could not be started: {exc}",
-        ) from exc
-
-    # Log stdout / stderr regardless of outcome
-    if result.stdout:
-        for line in result.stdout.strip().splitlines():
-            logger.info("[%s:stdout] %s", step_label, line)
-    if result.stderr:
-        for line in result.stderr.strip().splitlines():
-            logger.warning("[%s:stderr] %s", step_label, line)
-
-    if result.returncode != 0:
-        logger.error("[%s] Exited with code %d", step_label, result.returncode)
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                f"Pipeline step '{step_label}' failed (exit code {result.returncode}).  "
-                f"stderr: {result.stderr[-2000:] if result.stderr else '(empty)'}"
-            ),
-        )
-
-    logger.info("[%s] Completed successfully.", step_label)
-
-
-def run_step1_in_process(job_dir: Path, input_path: Path) -> None:
-    """Run DA3 + SAM 3.1 in this FastAPI process so the depth model cache persists."""
-    out_dir = job_dir / "outputs" / "inference_results"
-    logger.info(
-        "[Step1:DepthInference] Running in-process with persistent models "
-        "(model=%s, input_size=%d, inference_width=%d, output_width=%d)",
-        CFG.DEPTH_MODEL_NAME,
-        CFG.DEPTH_INPUT_SIZE,
-        CFG.INFERENCE_WIDTH,
-        CFG.OUTPUT_WIDTH,
-    )
-
-    started = datetime.now(timezone.utc)
-    try:
-        with step1_lock:
-            run_inference(
-                str(input_path),
-                out_dir=str(out_dir),
-                model_name=CFG.DEPTH_MODEL_NAME,
-                input_size=CFG.DEPTH_INPUT_SIZE,
-                save_16bit=True,
-                target_width=CFG.OUTPUT_WIDTH,
-                inference_width=CFG.INFERENCE_WIDTH,
-            )
-    except Exception as exc:
-        logger.exception("[Step1:DepthInference] Failed")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Pipeline step 'Step1:DepthInference' failed: {exc}",
-        ) from exc
-
-    elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-    logger.info("[Step1:DepthInference] Completed successfully in %.2fs.", elapsed)
-
-
-def encode_image_base64(path: Path) -> str:
-    """Read a binary image file and return its base64-encoded string."""
-    if not path.exists():
-        raise HTTPException(
-            status_code=500,
-            detail=f"Expected output file not found: {path.name}",
-        )
-    data = path.read_bytes()
-    return base64.b64encode(data).decode("ascii")
-
-
-def encode_preview_base64(
-    *,
-    background_path: Path,
-    gameplay_path: Path,
-    foreground_path: Path,
-    metadata: dict[str, Any],
-    max_long_side: int = 768,
-) -> str:
-    """Compose a small UI preview from the existing layer PNG outputs."""
-    try:
-        background = Image.open(background_path).convert("RGBA")
-        gameplay = Image.open(gameplay_path).convert("RGBA")
-        foreground = Image.open(foreground_path).convert("RGBA")
-
-        size = background.size
-        if gameplay.size != size:
-            gameplay = gameplay.resize(size, Image.Resampling.LANCZOS)
-        if foreground.size != size:
-            foreground = foreground.resize(size, Image.Resampling.LANCZOS)
-
-        preview = Image.alpha_composite(background, gameplay)
-        preview = Image.alpha_composite(preview, foreground)
-
-        points = metadata.get("points", [])
-        if len(points) >= 2:
-            draw = ImageDraw.Draw(preview)
-            width, height = preview.size
-            pixel_points = []
-            for point in points:
-                if not isinstance(point, (list, tuple)) or len(point) < 2:
-                    continue
-                x = max(0.0, min(1.0, float(point[0])))
-                y = max(0.0, min(1.0, float(point[1])))
-                pixel_points.append((int(x * (width - 1)), int(y * (height - 1))))
-
-            if len(pixel_points) >= 2:
-                stroke = max(3, width // 160)
-                draw.line(pixel_points, fill=(255, 216, 64, 230), width=stroke)
-                draw.line(pixel_points, fill=(24, 24, 24, 180), width=max(1, stroke // 3))
-
-        long_side = max(preview.size)
-        if long_side > max_long_side:
-            scale = max_long_side / long_side
-            preview = preview.resize(
-                (
-                    max(1, int(preview.width * scale)),
-                    max(1, int(preview.height * scale)),
-                ),
-                Image.Resampling.LANCZOS,
-            )
-
-        buffer = BytesIO()
-        preview.convert("RGB").save(buffer, format="PNG", optimize=True)
+        far, mid, near = (Image.open(p).convert("RGBA") for p in reversed(layer_paths))
+        image = Image.alpha_composite(Image.alpha_composite(far, mid.resize(far.size)), near.resize(far.size))
+        width, height = image.size
+        line = [(x * (width - 1), y * (height - 1)) for x, y in points]
+        if len(line) > 1:
+            # The showcase's lime track over a dark outline, readable on any photo.
+            draw = ImageDraw.Draw(image)
+            draw.line(line, fill=(0, 0, 0, 150), width=max(5, width // 110), joint="curve")
+            draw.line(line, fill=(196, 255, 58, 255), width=max(3, width // 200), joint="curve")
+        image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+        buffer = io.BytesIO()
+        image.convert("RGB").save(buffer, format="PNG", optimize=True)
         return base64.b64encode(buffer.getvalue()).decode("ascii")
     except Exception:
-        logger.warning("Failed to compose preview image.", exc_info=True)
+        log.warning("Could not compose the preview", exc_info=True)
         return ""
 
 
-def load_json(path: Path) -> dict[str, Any]:
-    """Read and parse a JSON file; raise HTTP 500 on failure."""
-    if not path.exists():
-        raise HTTPException(
-            status_code=500,
-            detail=f"Expected output JSON not found: {path.name}",
-        )
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Could not parse JSON from {path.name}: {exc}",
-        ) from exc
-
-
-def run_track_planning(job_dir: Path, input_path: Path) -> dict[str, Any] | None:
-    """Let Muse Spark choose the track surface. None means cut_img.py uses its heuristic."""
-    inference_dir = job_dir / "outputs" / "inference_results"
-    started = datetime.now(timezone.utc)
-    try:
-        plan = plan_track(
-            str(input_path),
-            str(inference_dir / CFG.DEPTH_MASK_FILENAME),
-            str(inference_dir / CFG.SAM31_OBJECTS_FILENAME),
-        )
-    except Exception:
-        logger.exception("[Step2:TrackSurface] Muse Spark failed; using geometric track selection")
-        return None
-
-    elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-    logger.info(
-        "[Step2:TrackSurface] Completed in %.1fs (attempts=%d): %s -- %s",
-        elapsed,
-        len(plan["attempts"]),
-        plan["surface_ids"],
-        plan["mission"],
-    )
-    return plan
-
-
-def run_level_finalize(job_dir: Path, input_path: Path, plan: dict[str, Any] | None) -> None:
-    """Add mission, surfaces and occluders to track_points.json; never fails the request."""
-    inference_dir = job_dir / "outputs" / "inference_results"
-    try:
-        finalize_level(
-            str(input_path),
-            str(inference_dir / CFG.DEPTH_MASK_FILENAME),
-            str(inference_dir / CFG.SAM31_OBJECTS_FILENAME),
-            str(job_dir / "Send2Unity"),
-            plan,
-        )
-    except Exception:
-        logger.exception("[Step3:LevelMetadata] Could not add level metadata; track points are unchanged")
-
-
-def run_restyle(job_dir: Path, input_path: Path, style: str) -> dict[str, Any] | None:
-    """Repaint the level art with Muse Image; None keeps the photo's layers."""
-    started = datetime.now(timezone.utc)
+def _restyle(photo: Path, level_dir: Path, objects_path: str, style: str) -> dict[str, Any] | None:
+    """The Muse Image style's manifest entry, or None to keep the photo's art."""
     try:
         manifest = stylize_run(
-            str(input_path),
-            str(job_dir / "Send2Unity"),
+            str(photo),
+            str(level_dir),
             [style],
-            setting=load_setting(str(job_dir / "outputs" / "inference_results" / CFG.SAM31_OBJECTS_FILENAME)),
-            removed=front_objects(
-                str(job_dir / "Send2Unity"), str(job_dir / "outputs" / "inference_results" / CFG.SAM31_OBJECTS_FILENAME)
-            ),
+            setting=load_setting(objects_path),
+            removed=front_objects(str(level_dir), objects_path),
         )
     except Exception:
-        logger.exception("[Step4:Restyle] Muse Image failed; returning the photo's layers")
+        log.exception("Muse Image restyle failed; returning the photo's layers")
         return None
     entry = next((e for e in manifest["styles"] if e["name"] == style), None)
     if entry is None:
-        logger.error("[Step4:Restyle] Muse Image failed (%s); returning the photo's layers", manifest["errors"].get(style))
-        return None
-    logger.info(
-        "[Step4:Restyle] %s in %.1fs (edge F1 %.3f -> %.3f, background: %s)",
-        style,
-        (datetime.now(timezone.utc) - started).total_seconds(),
-        entry["alignment"]["edge_f1_raw"],
-        entry["alignment"]["edge_f1"],
-        entry["background"]["source"],
-    )
+        log.error("Muse Image restyle failed (%s); returning the photo's layers", manifest["errors"].get(style))
     return entry
 
 
-def find_required_outputs(job_dir: Path) -> dict[str, Path]:
-    """Locate the four required output files and return their paths.
-
-    Raises HTTP 500 if any file is missing.
-    """
-    send2unity = job_dir / "Send2Unity"
-    paths = {
-        "foreground": send2unity / CFG.FOREGROUND_FILENAME,
-        "gameplay": send2unity / CFG.GAMEPLAY_FILENAME,
-        "background": send2unity / CFG.BACKGROUND_FILENAME,
-        "metadata": send2unity / CFG.TRACK_JSON_FILENAME,
-    }
-    missing = [k for k, v in paths.items() if not v.exists()]
-    if missing:
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                f"Missing pipeline outputs: {', '.join(missing)}. "
-                f"Expected in {send2unity}"
-            ),
-        )
-    return paths
-
-
-# ======================================================================
-# JOB-LEVEL SCRIPT PATCHING
-# ======================================================================
-# The legacy scripts use hard-coded relative paths such as:
-#   ./assets/examples/SOH/street2d.jpg
-#   ./outputs/inference_results/
-#   ./Send2Unity/
-#
-# To isolate each request we:
-#   1. Create symlinks inside the job dir so the scripts resolve their
-#      paths relative to the job dir as if it were the project root.
-#   2. Copy/symlink only what each step needs.
-# ======================================================================
-
-
-def _prepare_job_environment(job_dir: Path, input_path: Path) -> None:
-    """Set up the job directory so legacy scripts can run unmodified.
-
-    Creates the folder structure the scripts expect:
-        <job>/assets/examples/SOH/input.jpg
-        <job>/outputs/inference_results/      (empty, will be written)
-        <job>/Send2Unity/                     (empty, will be written)
-        <job>/models  -> WORKSPACE_ROOT/models        (symlink to model code)
-        <job>/depth_anything_3 -> ...         (symlink if exists)
-        <job>/<script>.py -> ...              (symlink for legacy subprocess steps)
-
-    This way every script's hard-coded relative paths just work.
-    """
-    base_name = input_path.stem  # "input"
-
-    # -- Directory structure --
-    soh_dir = job_dir / "assets" / "examples" / "SOH"
-    soh_dir.mkdir(parents=True, exist_ok=True)
-
-    inf_dir = job_dir / "outputs" / "inference_results"
-    inf_dir.mkdir(parents=True, exist_ok=True)
-
-    s2u_dir = job_dir / "Send2Unity"
-    s2u_dir.mkdir(parents=True, exist_ok=True)
-
-    # -- Symlink the uploaded image if not already at the expected location --
-    soh_link = soh_dir / input_path.name
-    if not soh_link.exists():
-        soh_link.symlink_to(input_path.resolve())
-
-    # -- Symlink project source packages so imports work --
-    for pkg_name in ("models", "depth_anything_3"):
-        pkg = CFG.WORKSPACE_ROOT / pkg_name
-        link = job_dir / pkg_name
-        if pkg.exists() and not link.exists():
-            link.symlink_to(pkg.resolve())
-
-    # -- Symlink each pipeline script --
-    for script in (
-        CFG.STEP1_SCRIPT,
-        CFG.STEP1_HELPER_SCRIPT,
-        CFG.STEP2_SCRIPT,
-        CFG.STEP3_SCRIPT,
-        "depth_adapter.py",
-    ):
-        src = CFG.SCRIPTS_ROOT / script
-        dst = job_dir / script
-        if src.exists() and not dst.exists():
-            dst.symlink_to(src.resolve())
-
-    # -- Create thin wrapper scripts that override the hard-coded base_name --
-    _write_step2_wrapper(job_dir, base_name)
-    _write_step3_wrapper(job_dir, base_name)
-
-
-def _write_step2_wrapper(job_dir: Path, base_name: str) -> None:
-    """Wrapper that execs cut_img.py with the correct base_name."""
-    wrapper = job_dir / "_run_step2.py"
-    content = (
-        "import os, sys\n"
-        "sys.path.insert(0, os.path.dirname(__file__))\n"
-        "\n"
-        'src_path = os.path.join(os.path.dirname(__file__), "cut_img.py")\n'
-        "with open(src_path) as f:\n"
-        "    source = f.read()\n"
-        "\n"
-        "# Override the hard-coded base_name\n"
-        f'source = source.replace(\'base_name = "street2d"\', \'base_name = "{base_name}"\')\n'
-        "\n"
-        'ns = {"__name__": "__main__", "__file__": src_path}\n'
-        "exec(compile(source, src_path, 'exec'), ns)\n"
-    )
-    wrapper.write_text(content, encoding="utf-8")
-
-
-def _write_step3_wrapper(job_dir: Path, base_name: str) -> None:
-    """Wrapper that calls the smooth track extractor with the correct paths."""
-    wrapper = job_dir / "_run_step3.py"
-    content = (
-        "import os, sys\n"
-        "sys.path.insert(0, os.path.dirname(__file__))\n"
-        "\n"
-        "from extract_track import extract_smooth_track\n"
-        "\n"
-        "npy_file = './Send2Unity/layer_00_mask.npy'\n"
-        "out_json = './Send2Unity/track_points.json'\n"
-        f"original_img = './assets/examples/SOH/{base_name}.jpg'\n"
-        f"img_name = '{base_name}.jpg'\n"
-        "\n"
-        "extract_smooth_track(\n"
-        "    npy_file,\n"
-        "    out_json,\n"
-        "    rgb_image_path=original_img,\n"
-        "    source_img_name=img_name,\n"
-        "    smooth_sigma=18.0,\n"
-        "    epsilon=18.0,\n"
-        "    alpha=0.75,\n"
-        "    sample_interval=18.0,\n"
-        "    clip_smooth_sigma=1.5,\n"
-        "    clip_top_margin_px=24.0,\n"
-        ")\n"
-    )
-    wrapper.write_text(content, encoding="utf-8")
-
-
-# ======================================================================
-# API ENDPOINTS
-# ======================================================================
-
-
 @app.get("/health")
-async def health():
-    """Simple liveness probe."""
+def health() -> dict[str, str]:
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
 @app.post("/infer")
-async def infer(photo: UploadFile = File(...), style: str | None = Form(None)):
-    """Run the full depth -> layers -> track pipeline on an uploaded image.
+def infer(photo: UploadFile = File(...), style: str | None = Form(None)) -> dict[str, Any]:
+    style = (DEFAULT_STYLE if style is None else style).strip().lower()
+    style = "" if style in NO_STYLE else style
+    if style and style not in STYLES:
+        raise HTTPException(400, f"Unknown style '{style}'; choose from {sorted(STYLES)} or 'original'.")
+    image = cv2.imdecode(np.frombuffer(photo.file.read(), np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise HTTPException(400, "The upload is not a readable image.")
 
-    Expects multipart/form-data with field name **photo**, and optionally
-    **style** (a Muse Image art style; defaults to $MUSE_IMAGE_STYLE, empty =
-    the photo's own pixels).
+    started = time.perf_counter()
+    with tempfile.TemporaryDirectory(prefix="skatep-") as work, ThreadPoolExecutor(max_workers=2) as muse_image:
+        work = Path(work)
+        photo_path, level_dir, inference_dir = work / "photo.jpg", work / "level", work / "inference"
+        cv2.imwrite(str(photo_path), image)
+        objects_path = output_paths(str(photo_path), str(inference_dir))["objects"]
 
-    Returns
-    -------
-    JSON with keys:
-        images.preview_base64     - composed base64 PNG for UI preview
-        images.foreground_base64  - base64 PNG of the nearest layer
-        images.gameplay_base64    - base64 PNG of the middle layer
-        images.background_base64  - base64 PNG of the farthest layer
-        metadata                  - parsed track_points.json dict (+ art_style
-                                    when the layers were restyled)
-    """
-    job_dir: Path | None = None
-    # Muse Image calls that run alongside the rest of the pipeline.
-    executor = ThreadPoolExecutor(max_workers=2)
-    style = (style if style is not None else CFG.DEFAULT_STYLE).strip().lower()
-    if style in ("none", "original", "photo"):
-        style = ""
+        # Muse Image needs only the photo: start the restyle now.
+        early: Future | None = None
+        if style:
+            early = muse_image.submit(prefetch_style, style, fit_width(image, OUTPUT_WIDTH), str(level_dir))
+        background: list[Future] = []
 
-    try:
-        # 1. Validate upload
-        if not photo.filename:
-            raise HTTPException(status_code=400, detail="No filename provided.")
-        if style and style not in STYLES:
-            raise HTTPException(status_code=400, detail=f"Unknown style '{style}'; choose from {sorted(STYLES)}.")
+        def fill_background() -> None:
+            if not style and fill_enabled():
+                background.append(
+                    muse_image.submit(
+                        fill_photo_background,
+                        str(photo_path),
+                        str(level_dir),
+                        setting=load_setting(objects_path),
+                        removed=front_objects(str(level_dir), objects_path),
+                    )
+                )
 
-        # 2. Create isolated job directory
-        job_dir = _create_job_dir()
-
-        # 3. Save uploaded image
-        input_path = job_dir / "assets" / "examples" / "SOH" / CFG.INPUT_FILENAME
-        await save_upload_file(photo, input_path)
-
-        # 4. Prepare the job environment (symlinks + wrapper scripts)
-        _prepare_job_environment(job_dir, input_path)
-
-        #    A restyle needs only the photo, so Muse Image starts now and runs
-        #    alongside DA3, SAM 3.1 and Muse Spark; stylize_run reuses its result.
-        restyle_future = None
-        photo_bgr = cv2.imread(str(input_path)) if style else None
-        if photo_bgr is not None:
-            restyle_future = executor.submit(
-                prefetch_style, style, _resize_to_width(photo_bgr, CFG.OUTPUT_WIDTH), str(job_dir / "Send2Unity")
-            )
-
-        # 5. Run pipeline -- Step 1: Depth inference + SAM 3.1 segmentation
-        run_step1_in_process(job_dir, input_path)
-
-        # 6. Run pipeline -- Step 2: Muse Spark picks the track surface
-        #    (cut_img.py falls back to its heuristic if this fails), then layer cutting
-        plan = run_track_planning(job_dir, input_path)
-        run_command(
-            [CFG.PYTHON, "_run_step2.py"],
-            cwd=job_dir,
-            timeout=CFG.STEP2_TIMEOUT,
-            step_label="Step2:CutLayers",
-        )
-        #    The photo's own art: Muse Image fills the background layer behind
-        #    the front layers, alongside track extraction.
-        background_future = None
-        if not style and fill_enabled():
-            background_future = executor.submit(
-                fill_photo_background,
-                str(input_path),
-                str(job_dir / "Send2Unity"),
-                setting=load_setting(str(job_dir / "outputs" / "inference_results" / CFG.SAM31_OBJECTS_FILENAME)),
-                removed=front_objects(
-                    str(job_dir / "Send2Unity"), str(job_dir / "outputs" / "inference_results" / CFG.SAM31_OBJECTS_FILENAME)
-                ),
-            )
-
-        # 7. Run pipeline -- Step 3: Track extraction (top edge of the surface,
-        #    continued behind objects standing on it)
         try:
-            repair_track_occlusions(
-                str(job_dir / "Send2Unity" / CFG.LAYER_MASK_FILENAME),
-                str(job_dir / "outputs" / "inference_results" / CFG.DEPTH_MASK_FILENAME),
-            )
-        except Exception:
-            logger.exception("[Step3:ExtractTrack] Occlusion repair failed; using the raw track mask")
-        run_command(
-            [CFG.PYTHON, "_run_step3.py"],
-            cwd=job_dir,
-            timeout=CFG.STEP3_TIMEOUT,
-            step_label="Step3:ExtractTrack",
-        )
-        run_level_finalize(job_dir, input_path, plan)
+            metadata = build_level(str(photo_path), str(inference_dir), str(level_dir), after_layers=fill_background)
+        except Exception as exc:
+            log.exception("Level generation failed")
+            raise HTTPException(500, f"Level generation failed: {exc}") from exc
 
-        # 8. Locate required outputs
-        if background_future is not None:
+        for future in background:
             try:
-                logger.info("[Step2:Background] %s", background_future.result())
+                log.info("Background fill: %s", future.result())
             except Exception:
-                logger.exception("[Step2:Background] Muse Image fill failed; keeping the inpainted background")
-        outputs = find_required_outputs(job_dir)
-        metadata = load_json(outputs["metadata"])
+                log.exception("Muse Image background fill failed; keeping the inpainted background")
 
-        # 9. Optional: Muse Image repaints the art; the layers keep their
-        #    SAM 3.1 / DA3 alphas, so the track and occluders are unchanged.
-        if restyle_future is not None:
+        layer_paths = [level_dir / name for name in LAYER_FILES]
+        if early is not None:
             try:
-                restyle_future.result()
+                early.result()
             except Exception:
-                logger.exception("[Step4:Restyle] Early Muse Image call failed; trying again")
-        art = run_restyle(job_dir, input_path, style) if style else None
-        if art is not None:
-            style_dir = job_dir / "Send2Unity" / art["dir"]
-            outputs["foreground"] = style_dir / CFG.FOREGROUND_FILENAME
-            outputs["gameplay"] = style_dir / CFG.GAMEPLAY_FILENAME
-            outputs["background"] = style_dir / CFG.BACKGROUND_FILENAME
-            if art["track_color"]:
-                metadata["track_color"] = art["track_color"]
-            metadata["art_style"] = {
-                "name": art["name"],
-                "label": art["label"],
-                "model": "muse-image",
-                "edge_f1": art["alignment"]["edge_f1"],
-            }
+                log.warning("Early Muse Image call failed; the restyle retries it", exc_info=True)
+            art = _restyle(photo_path, level_dir, objects_path, style)
+            if art is not None:
+                layer_paths = [level_dir / art["dir"] / name for name in LAYER_FILES]
+                metadata["track_color"] = art["track_color"] or metadata["track_color"]
+                metadata["art_style"] = {
+                    "name": art["name"],
+                    "label": art["label"],
+                    "model": "muse-image",
+                    "edge_f1": art["alignment"]["edge_f1"],
+                }
 
-        # 10. Build response
-        response_data = {
+        foreground, gameplay, background_layer = layer_paths
+        response = {
             "images": {
-                "preview_base64": encode_preview_base64(
-                    background_path=outputs["background"],
-                    gameplay_path=outputs["gameplay"],
-                    foreground_path=outputs["foreground"],
-                    metadata=metadata,
-                ),
-                "foreground_base64": encode_image_base64(outputs["foreground"]),
-                "gameplay_base64": encode_image_base64(outputs["gameplay"]),
-                "background_base64": encode_image_base64(outputs["background"]),
+                "preview_base64": preview_png(layer_paths, metadata.get("points", [])),
+                "foreground_base64": _b64_file(foreground),
+                "gameplay_base64": _b64_file(gameplay),
+                "background_base64": _b64_file(background_layer),
             },
             "metadata": metadata,
         }
+    level = metadata.get("level", {})
+    log.info("Level ready in %.1fs (style=%s): %s", time.perf_counter() - started, style or "photo", level.get("mission"))
+    return response
 
-        logger.info("Pipeline completed successfully for job %s", job_dir.name)
-        return JSONResponse(content=response_data)
-
-    except HTTPException:
-        raise  # already formatted
-    except Exception as exc:
-        logger.exception("Unhandled error during inference")
-        raise HTTPException(
-            status_code=500, detail=f"Internal error: {exc}"
-        ) from exc
-    finally:
-        # Unfinished Muse Image calls only write into the job directory below.
-        executor.shutdown(wait=False, cancel_futures=True)
-        # 11. Clean up job directory
-        if job_dir and job_dir.exists():
-            try:
-                shutil.rmtree(job_dir)
-                logger.info("Cleaned up job directory: %s", job_dir)
-            except Exception:
-                logger.warning(
-                    "Failed to clean up %s", job_dir, exc_info=True
-                )
-
-
-# ======================================================================
-# ENTRYPOINT
-# ======================================================================
 
 if __name__ == "__main__":
-    # Example:  python infer.py
-    # Or:       uvicorn infer:app --host 0.0.0.0 --port 9000
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=9000)

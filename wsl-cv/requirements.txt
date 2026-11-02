@@ -1,26 +1,13 @@
-pre-commit
-trimesh
-torch>=2
-torchvision
-einops
-huggingface_hub
-imageio
-numpy<2
-opencv-python
-xformers
-open3d
-fastapi
-uvicorn
-python-multipart
-requests
-typer
-pillow
-omegaconf
-evo
-e3nn
-moviepy
-plyfile
-pillow_heif
-safetensors
-pycolmap
-meta-sam-parser>=0.1.0
+# SkateP backend. Install Depth Anything 3 first (pip install -e <Depth-Anything-3 checkout>);
+# it brings torch and its own dependencies.
+numpy>=1.26,<2
+opencv-python>=4.9
+scipy>=1.11
+pillow>=10
+requests>=2.31
+meta-sam-parser>=0.1.0      # decodes SAM 3.1 boxes and masks from the Meta Model API
+fastapi>=0.110              # level API (scripts/infer.py)
+uvicorn>=0.29
+python-multipart>=0.0.9
+flask>=3.0                  # gateway (win-server/server.py), when it runs in this env
+playwright>=1.44            # optional: showcase MP4 rendering (scripts/render_showcase.py)

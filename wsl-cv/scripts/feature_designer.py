@@ -28,7 +28,8 @@ from typing import Any
 import cv2
 import numpy as np
 
-from level_designer import _get_float_env, _get_int_env, _top_edge
+from config import env_number
+from level_designer import _top_edge
 from muse_spark import call_muse_spark, image_data_url, model_id
 
 GRID = 1000.0
@@ -126,9 +127,9 @@ class TrackScene:
         self.track_y = np.interp(np.arange(self.width), xs, ys, left=np.nan, right=np.nan)
         self.x0, self.x1 = int(np.ceil(xs.min())), int(np.floor(xs.max()))
 
-        self.corridor = int(self.height * _get_float_env("LEVEL_SKATER_HEIGHT", 0.15))
-        self.edge_tol = self.height * _get_float_env("TRICK_EDGE_TOLERANCE", 0.035)
-        self.max_air = _get_float_env("TRICK_MAX_AIR", 0.4)  # of the photo height
+        self.corridor = int(self.height * env_number("LEVEL_SKATER_HEIGHT", 0.15))
+        self.edge_tol = self.height * env_number("TRICK_EDGE_TOLERANCE", 0.035)
+        self.max_air = env_number("TRICK_MAX_AIR", 0.4)  # of the photo height
         self._geometry: dict[str, dict[str, Any]] = {}
 
     def gx(self, px: float) -> int:
@@ -156,7 +157,7 @@ class TrackScene:
         # where its top can still poke up to the line in the photo).
         cols = np.flatnonzero(contact)
         base = float(np.median(bottom[cols] - self.track_y[cols])) if cols.size else np.inf
-        stands = abs(base) <= self.height * _get_float_env("TRICK_BASE_TOLERANCE", 0.06)
+        stands = abs(base) <= self.height * env_number("TRICK_BASE_TOLERANCE", 0.06)
         geo = {"mask_top": top, "contact": contact, "along": along, "stands": stands, "base": base}
         self._geometry[oid] = geo
         return geo
@@ -350,7 +351,7 @@ def design_tricks(image_path: str, inference_dir: str, send2unity_dir: str) -> d
     ]
 
     attempts: list[dict[str, Any]] = []
-    max_attempts = max(1, _get_int_env("MUSE_SPARK_MAX_ATTEMPTS", 3))
+    max_attempts = max(1, env_number("MUSE_SPARK_MAX_ATTEMPTS", 3))
     for attempt in range(1, max_attempts + 1):
         started = time.perf_counter()
         raw_text, usage = call_muse_spark(

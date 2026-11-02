@@ -1,7 +1,7 @@
 """Muse Spark level designer: picks the riding surface and writes the mission.
 
 The track itself keeps the original SkateP logic: it is the smoothed top edge
-of the ground surface (extract_track.py), and every other object stays in the
+of the ground surface (track.py), and every other object stays in the
 scene as an occluder or backdrop, so the skater weaves through the photo
 instead of climbing over it. Muse Spark replaces the fragile geometric guess
 of *which* region is the ground:
@@ -10,8 +10,8 @@ of *which* region is the ground:
      object(s) the track should follow, plus a mission line.
   2. The choice is verified against the masks (does it span the scene? is it
      at ground level?). Violations go back to Muse Spark, up to N attempts.
-  3. The chosen label ids are written next to the label map; cut_img.py uses
-     them as the track region instead of its heuristic.
+  3. The chosen label ids go to layers.py as the ground region (its geometric
+     guess is only the fallback).
 
 After the track is extracted, finalize_level() adds the "level" field to
 track_points.json: mission, surfaces, and the occluders the skater passes behind.
@@ -26,6 +26,7 @@ import cv2
 import numpy as np
 import scipy.ndimage
 
+from config import env_number
 from muse_spark import call_muse_spark, image_data_url, model_id
 
 GRID = 1000.0
@@ -62,28 +63,12 @@ PLAN_SCHEMA = {
 }
 
 
-def _get_float_env(name: str, default: float) -> float:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except ValueError:
-        return default
 
 
-def _get_int_env(name: str, default: int) -> int:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        return int(value)
-    except ValueError:
-        return default
 
 
 def surfaces_path_for(labels_path: str) -> str:
-    """Sidecar file cut_img.py reads to use the chosen surfaces as the track region."""
+    """Sidecar file recording the chosen surfaces next to the label map."""
     return labels_path.replace("_depth_mask.npy", "_track_surfaces.json")
 
 
@@ -136,7 +121,7 @@ def verify_surfaces(surface_ids: list[str], objects: dict[str, dict[str, Any]], 
 
     union = np.isin(labels, [objects[sid]["label_id"] for sid in known])
     coverage = float(union.any(axis=0).mean())
-    min_coverage = _get_float_env("LEVEL_MIN_TRACK_COVERAGE", 0.6)
+    min_coverage = env_number("LEVEL_MIN_TRACK_COVERAGE", 0.6)
     if coverage < min_coverage:
         errors.append(
             f"the chosen surface(s) span only {coverage:.0%} of the image width; the track must cross "
@@ -145,7 +130,7 @@ def verify_surfaces(surface_ids: list[str], objects: dict[str, dict[str, Any]], 
 
     top = _top_edge(union)
     top_y = float(np.nanmedian(top)) / (height - 1) * GRID
-    min_top = _get_float_env("LEVEL_MIN_TRACK_TOP", 250.0)
+    min_top = env_number("LEVEL_MIN_TRACK_TOP", 250.0)
     if top_y < min_top:
         errors.append(
             f"the chosen surface's top edge sits at y={top_y:.0f}, in the upper part of the image; "
@@ -159,7 +144,7 @@ def verify_surfaces(surface_ids: list[str], objects: dict[str, dict[str, Any]], 
 
 
 def plan_track(image_path: str, labels_path: str, objects_path: str) -> dict[str, Any]:
-    """Let Muse Spark pick the track surface; writes the sidecar cut_img.py reads."""
+    """Let Muse Spark pick the track surface (also saved as a sidecar next to the label map)."""
     image_bgr = cv2.imread(image_path)
     if image_bgr is None:
         raise FileNotFoundError(f"Failed to load image: {image_path}")
@@ -188,7 +173,7 @@ def plan_track(image_path: str, labels_path: str, objects_path: str) -> dict[str
     ]
 
     attempts: list[dict[str, Any]] = []
-    max_attempts = max(1, _get_int_env("MUSE_SPARK_MAX_ATTEMPTS", 3))
+    max_attempts = max(1, env_number("MUSE_SPARK_MAX_ATTEMPTS", 3))
     for attempt in range(1, max_attempts + 1):
         started = time.perf_counter()
         raw_text, usage = call_muse_spark(
@@ -270,7 +255,7 @@ def _runs(columns: np.ndarray, max_gap: int) -> list[tuple[int, int]]:
 def repair_track_occlusions(track_mask_path: str, labels_path: str) -> int:
     """Let the track continue behind objects standing on the ground.
 
-    extract_track.py follows the topmost ground pixel per column, so a hydrant,
+    track.py follows the topmost ground pixel per column, so a hydrant,
     a person or a guitar case standing on the floor pulls the line down to
     their base. For every object sitting on the ground's top edge, the edge
     under it is rebuilt from the uncovered ground on both sides (one side at
@@ -376,7 +361,7 @@ def find_occluders(
     """
     height, width = labels.shape
     track_y = _track_y(points, width, height)
-    corridor_h = int(height * _get_float_env("LEVEL_SKATER_HEIGHT", 0.15))
+    corridor_h = int(height * env_number("LEVEL_SKATER_HEIGHT", 0.15))
 
     rows = np.arange(height)[:, None]
     valid = np.isfinite(track_y)

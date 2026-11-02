@@ -1,40 +1,35 @@
+# Secrets
+.env
+
+# Python
 __pycache__/
 *.pyc
 .venv/
 venv/
-outputs/
-_jobs/
-*.npy
-*.npz
-*.pth
+
+# Model weights and arrays
 *.pt
+*.pth
 *.ckpt
 *.safetensors
-checkpoints/
-weights/
-models/
-.ipynb_checkpoints/
-wsl-cv/Send2Unity/
-.DS_Store
-.vscode/
-_legacy/
-_legacy_2d/
-wsl-cv/Legacy/
-unity_client/MobileCameraCapture_old.cs
-.codex
+*.npy
+*.npz
 
-.env
-# Generated showcase runs: keep only the self-contained pages.
+# Generated runs
+outputs/
+_jobs/
+wsl-cv/Send2Unity/
+# Showcases: keep only the self-contained pages and the gallery.
 wsl-cv/showcase/*/*
 !wsl-cv/showcase/*/showcase.html
-# Photo picker page (links local preview images).
 wsl-cv/showcase/preview.html
-# Test photos dropped in for run_photos.sh (may show people; keep them local).
+# Photos dropped in for run_photos.sh (may show people; keep them local).
 wsl-cv/photos/*
 !wsl-cv/photos/.gitkeep
 
-# Gateway debug copy of the last upload
-win-server/captures/
-
-# Personal notes and hackathon plans
+# Local notes and tools
 doc/
+.codex
+.vscode/
+.DS_Store
+.ipynb_checkpoints/

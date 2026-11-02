@@ -8,7 +8,7 @@ it is. That is close but not guaranteed, so each result is
      outlines (outline_offset) and an overall edge F1, raw and registered,
 so the claim "the SAM 3.1 masks still fit" is measured, not assumed. The
 layers are then re-cut from the styled pixels with the exact alphas
-cut_img.py produced from the SAM 3.1 + DA3 layering, so every style shares the
+layers.py produced from the SAM 3.1 + DA3 layering, so every style shares the
 same foreground / gameplay / background split and the same track.
 
 Outputs per run (next to the Unity layers):
@@ -35,7 +35,7 @@ import cv2
 import numpy as np
 import requests
 
-from extract_track import track_color
+from track import track_color
 from muse_spark import image_data_url
 
 MUSE_IMAGE_API_URL = "https://api.meta.ai/v1/responses"
@@ -338,7 +338,7 @@ def front_holes(send2unity_dir: str) -> np.ndarray:
     for name in ("merged_layer_01.png", "merged_layer_02.png"):
         layer = cv2.imread(os.path.join(send2unity_dir, name), cv2.IMREAD_UNCHANGED)
         if layer is None or layer.ndim != 3 or layer.shape[2] != 4:
-            raise FileNotFoundError(f"Missing RGBA layer {name} in {send2unity_dir}; run cut_img.py first.")
+            raise FileNotFoundError(f"Missing RGBA layer {name} in {send2unity_dir}; run layers.py first.")
         covered = (layer[:, :, 3] > 0).astype(np.uint8) * 255
         holes = covered if holes is None else np.maximum(holes, covered)
     return cv2.dilate(holes, np.ones((7, 7), np.uint8))
@@ -523,7 +523,7 @@ def fill_photo_background(
     setting: str | None = None,
     removed: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Replace cut_img.py's inpainted merged_layer_03.png with a Muse Image fill.
+    """Replace layers.py's inpainted merged_layer_03.png with a Muse Image fill.
 
     Falls back to cv2.inpaint. Returns the entry also written to background.json.
     """
@@ -544,7 +544,7 @@ def fill_photo_background(
 
 
 def export_styled_layers(styled: np.ndarray, send2unity_dir: str, out_dir: str, background: np.ndarray | None = None) -> None:
-    """Re-cut the three layers from the styled image with cut_img.py's alphas.
+    """Re-cut the three layers from the styled image with layers.py's alphas.
 
     Foreground / gameplay keep their exact alpha; the background is the
     Muse Image fill when given, else the styled image inpainted under the front layers.
@@ -553,7 +553,7 @@ def export_styled_layers(styled: np.ndarray, send2unity_dir: str, out_dir: str, 
     for name in ("merged_layer_01.png", "merged_layer_02.png"):
         layer = cv2.imread(os.path.join(send2unity_dir, name), cv2.IMREAD_UNCHANGED)
         if layer is None or layer.ndim != 3 or layer.shape[2] != 4:
-            raise FileNotFoundError(f"Missing RGBA layer {name} in {send2unity_dir}; run cut_img.py first.")
+            raise FileNotFoundError(f"Missing RGBA layer {name} in {send2unity_dir}; run layers.py first.")
         cut = cv2.cvtColor(styled, cv2.COLOR_BGR2BGRA)
         cut[:, :, 3] = layer[:, :, 3]
         cv2.imwrite(os.path.join(out_dir, name), cut)

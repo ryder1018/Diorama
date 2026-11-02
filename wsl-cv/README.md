@@ -1,32 +1,24 @@
-# WSL CV Backend Documentation
+# SkateP backend (`wsl-cv/`)
 
-This module handles the computer vision pipeline for the SkateP project. It receives images, extracts depth maps using Depth Anything 3, finds skateable objects (stairs, handrails, benches, ...) with SAM 3.1 text prompts through the Meta Model API, segments them into visual layers, and generates track points for Unity.
+Turns one photo into a playable 2.5D skate level: depth-sorted layers, a riding line, the objects the skater passes behind, Muse Spark tricks, Muse Image art styles, and a 3D showcase of the whole run. It runs in WSL/Linux on a CUDA GPU; installation is in the root [`README.md`](../README.md#installation). Set `MODEL_API_KEY` (or put it in the repo-root `.env`, which the scripts load).
 
-## 1. Environment Setup & Execution
+## Pipeline
 
-### Installation
-See the Installation section of the root [`README.md`](../README.md) (conda + pip, with Depth Anything 3 installed as a package).
+| Step | Module | What happens |
+|---|---|---|
+| 1 | `perception.py` (+ `depth.py`, `sam31_segmentation.py`) | Muse Spark lists the concepts worth segmenting; SAM 3.1 masks them while Depth Anything 3 computes depth on the local GPU. Writes `<base>_depth_16bit.png`, `<base>_depth_mask.npy` (label map), `<base>_sam31_objects.json`. |
+| 2 | `level_designer.plan_track` | Muse Spark picks the riding surface; the choice is verified against the masks and repaired if needed. |
+| 3 | `layers.py` | Regions split into near / mid / far by mean depth (thirds); writes `merged_layer_01..03.png`, the ground mask `layer_00_mask.npy` and `layers.json`. |
+| 4 | `track.py`, `level_designer` | The ground edge is continued behind standing objects, traced into `track_points.json`, and given its occluders and mission (`finalize_level`). |
+| 5 | `feature_designer.py` | Muse Spark jumps and grinds, verified against the masks (`features.json`, showcase only). |
+| 6 | `muse_image.py` | Art styles and the background hidden behind the front layers. |
+| 7 | `showcase.py` | The self-contained 3D replay page. |
 
-SAM 3.1 runs through the Meta Model API, so no SAM weights are downloaded. Set your API key before starting the server:
+`scripts/pipeline.py` runs them in order: `--preview` stops after step 4, `--resume` starts at step 5 from an earlier preview. The API (`scripts/infer.py`) runs steps 1–4 and, when a style is asked for, step 6.
 
 ```bash
-export MODEL_API_KEY=<your Meta Model API key>
+python scripts/pipeline.py photo.jpg --out_dir run/outputs --send2unity_dir run [--styles comic,snow] [--preview | --resume]
 ```
-
-`requirements.txt` includes `meta-sam-parser`, Meta's decoder for SAM 3.1 box/mask output.
-
-### Running the API Server
-Start the FastAPI backend server:
-```bash
-uvicorn scripts.infer:app --host 0.0.0.0 --port 9000
-```
-Outputs and temporary job directories (`_jobs/`) are managed automatically during API execution.
-
-### Running Scripts Manually
-```bash
-python scripts/pipeline.py ./assets/pictures/cup.jpg
-```
-Intermediate outputs will be saved to `outputs/` and `Send2Unity/`.
 
 ### Trying Photos
 Drop photos into `wsl-cv/photos/` and run `./run_photos.sh` (inside the project env). Each new photo gets `showcase/<name>/showcase.html`, and `showcase/index.html` links them all; already-built photos are skipped (`--force` rebuilds, `--video` also renders MP4s). For a single photo anywhere on disk: `./try_photo.sh <photo> [name] [--video]`.
@@ -46,7 +38,7 @@ Because the masks are reused, the composition is measured instead of assumed:
 
 Outputs: `<send2unity_dir>/styles/<name>/{styled_raw,styled,fill_raw,merged_layer_01..03}.png` and `<send2unity_dir>/styles.json` (alignment, timing, token usage, a per-style `track_color` and `background` source). Server errors and timeouts are retried (`MUSE_IMAGE_RETRIES`, default 2). A style that still fails, for example one blocked by Muse Image's content filter, is left out, and the run keeps the others.
 
-**Background fill:** `cut_img.py` fills the background layer with `cv2.inpaint`, which smears across large holes. Muse Image replaces it: everything the foreground and gameplay layers cover (grown by a few pixels) is painted solid magenta, and Muse Image is asked to fill the magenta by continuing whatever surrounds it in the same place, adding no new objects. Most of the frame can be magenta, so the prompt also carries Muse Spark's one-sentence `setting` of the photo (e.g. "a bright indoor room with grey and yellow foam floor tiles and mint-green walls"), written in the same call that proposes the SAM 3.1 concepts and stored in `*_sam31_objects.json`; older runs get one from a separate Muse Spark call (`--objects`). The prompt names no landscape features: an earlier version that listed mountains and vegetation turned desks and rooms into forests. The result is registered like a restyle and only the filled pixels are used; the rest keeps the original pixels. Because the hidden objects are erased from the input, they cannot come back as ghosts, including objects SAM 3.1 never named. Muse Image ignores `input_image_mask` (tested: accepted, no effect), hence the key color. Each style is filled from its own image, and its fill prompt spells out that style's look and puts it above the setting's lighting (the setting is written from the photo, so "a bright lawn under a blue sky" otherwise turned the fill of a cyberpunk night or a snow scene back into a sunny photo when most of the frame was magenta), and the photo gets one too (`<send2unity_dir>/background/`, `background.json`). Fills are cached per image and holes. A hole keeps its object's outline, which invited the model to paint the object back (a hydrant-shaped hole became a hydrant), so the prompt also names the removed objects (the front-layer SAM 3.1 objects that Muse Spark did not list as `fixed`, i.e. not ground, walls or buildings) and asks for background only; an object can still come back now and then. Two checks run on every fill: no more than 2 % of the area may stay magenta, and the colors just outside the holes, which the fill was told to keep, may not shift by more than 20 (Lab, `MUSE_IMAGE_FILL_MAX_DRIFT`; good fills stay under ~13, while fills that redrew the picture in another look, such as a cyberpunk scene coming back as a daylight photo, measured 27–79). A failed fill is made again (`MUSE_IMAGE_FILL_ATTEMPTS`, default 2 calls) and then falls back to `cv2.inpaint`; `MUSE_IMAGE_FILL=0` turns fills off.
+**Background fill:** `layers.py` fills the background layer with `cv2.inpaint`, which smears across large holes. Muse Image replaces it: everything the foreground and gameplay layers cover (grown by a few pixels) is painted solid magenta, and Muse Image is asked to fill the magenta by continuing whatever surrounds it in the same place, adding no new objects. Most of the frame can be magenta, so the prompt also carries Muse Spark's one-sentence `setting` of the photo (e.g. "a bright indoor room with grey and yellow foam floor tiles and mint-green walls"), written in the same call that proposes the SAM 3.1 concepts and stored in `*_sam31_objects.json`; older runs get one from a separate Muse Spark call (`--objects`). The prompt names no landscape features: an earlier version that listed mountains and vegetation turned desks and rooms into forests. The result is registered like a restyle and only the filled pixels are used; the rest keeps the original pixels. Because the hidden objects are erased from the input, they cannot come back as ghosts, including objects SAM 3.1 never named. Muse Image ignores `input_image_mask` (tested: accepted, no effect), hence the key color. Each style is filled from its own image, and its fill prompt spells out that style's look and puts it above the setting's lighting (the setting is written from the photo, so "a bright lawn under a blue sky" otherwise turned the fill of a cyberpunk night or a snow scene back into a sunny photo when most of the frame was magenta), and the photo gets one too (`<send2unity_dir>/background/`, `background.json`). Fills are cached per image and holes. A hole keeps its object's outline, which invited the model to paint the object back (a hydrant-shaped hole became a hydrant), so the prompt also names the removed objects (the front-layer SAM 3.1 objects that Muse Spark did not list as `fixed`, i.e. not ground, walls or buildings) and asks for background only; an object can still come back now and then. Two checks run on every fill: no more than 2 % of the area may stay magenta, and the colors just outside the holes, which the fill was told to keep, may not shift by more than 20 (Lab, `MUSE_IMAGE_FILL_MAX_DRIFT`; good fills stay under ~13, while fills that redrew the picture in another look, such as a cyberpunk scene coming back as a daylight photo, measured 27–79). A failed fill is made again (`MUSE_IMAGE_FILL_ATTEMPTS`, default 2 calls) and then falls back to `cv2.inpaint`; `MUSE_IMAGE_FILL=0` turns fills off.
 
 ```bash
 python scripts/muse_image.py <image> <send2unity_dir> [--styles comic,snow|all|none] [--force] [--no-photo-background] [--objects <run>_sam31_objects.json]
@@ -59,7 +51,7 @@ After the track exists, `scripts/feature_designer.py` asks Muse Spark where a sk
 - **grind**: the object must be skateable and its top edge must follow the track (within `TRICK_EDGE_TOLERANCE`, 3.5 % of the height) along at least 60 % of the span; the feedback names where the edge actually meets the track.
 - Tricks may not overlap.
 
-Violations go back to Muse Spark for repair (up to `MUSE_SPARK_MAX_ATTEMPTS`); tricks that still fail are dropped. When no object meets the track, Muse Spark is not called. The result is `<send2unity_dir>/features.json` (tricks, a mission that names them, every attempt); `track_points.json` and the `/infer` response for Unity are unchanged. `pipeline.py` runs it as Step 4b; `./run_photos.sh --tricks` (re)runs it on every built showcase and rebuilds the pages. On the 9 sample levels it placed a jump on 2, a grind on 2 and nothing on 5 (plazas, lawns and streets where only buildings, trees or people meet the line).
+Violations go back to Muse Spark for repair (up to `MUSE_SPARK_MAX_ATTEMPTS`); tricks that still fail are dropped. When no object meets the track, Muse Spark is not called. The result is `<send2unity_dir>/features.json` (tricks, a mission that names them, every attempt); `track_points.json` and the `/infer` response for Unity are unchanged. `pipeline.py` runs it as step 5; `./run_photos.sh --tricks` (re)runs it on every built showcase and rebuilds the pages. On the 9 sample levels it placed a jump on 2, a grind on 2 and nothing on 5 (plazas, lawns and streets where only buildings, trees or people meet the line).
 
 ```bash
 python scripts/feature_designer.py <image> <inference_dir> <send2unity_dir>
@@ -80,93 +72,70 @@ pip install playwright && python -m playwright install chromium   # once
 python scripts/render_showcase.py <send2unity_dir>/showcase.html --out showcase.mp4 [--style cyberpunk] [--no-audio] [--no-fade]
 ```
 
-## 2. Repository Map
+## Modules
 
-*   `scripts/infer.py`: Active runtime API entrypoint (FastAPI server). It creates one isolated `_jobs/` directory per request and packages the Unity-facing JSON response.
-*   `scripts/pipeline.py`: Standalone pipeline execution script.
-*   `scripts/run_inference_depth_sam31.py`: DA3 depth generation plus SAM 3.1 segmentation; also writes `{base}_sam31_objects.json` (label, box, score, label id per object).
-*   `scripts/sam31_segmentation.py`: Muse Spark first proposes this photo's concepts to segment (skateable + scenery); then SAM 3.1 API calls (one noun-phrase prompt per request), mask decoding, and non-overlapping label-map export. Falls back to a fixed concept list if the proposal fails.
-*   `scripts/muse_spark.py`: Shared Muse Spark client (Responses API, JSON-schema structured output). Model defaults to `muse-spark-1.3-contributor`; override with `MUSE_SPARK_MODEL_ID`.
-*   `scripts/cut_img.py`: Depth-sorted visual layer generation (foreground, gameplay, background) plus background inpainting (replaced by Muse Image fills in `muse_image.py`).
-*   `scripts/level_designer.py`: Muse Spark picks which SAM 3.1 object(s) are the riding surface (verified against the masks: must span the scene at ground level; violations are fed back for repair, up to `MUSE_SPARK_MAX_ATTEMPTS`, default 3). Also continues the track behind objects standing on the ground, finds the occluders the skater passes behind (closer than the track in DA3 depth), and has Muse Spark write the mission. Adds a `level` field to `track_points.json` (mission, surfaces, occluders, and `render_order`: background → gameplay → track/skater → foreground, matching Unity's Background / Midground / Foreground sorting layers) and fills Unity's existing `occluded_segments` (point-index ranges the foreground draws over). Writes `level_vis.png` / `level_design_log.json`. `cut_img.py` also writes `layers.json` (which SAM region went into which layer image).
-*   `scripts/feature_designer.py`: Muse Spark places jumps and grinds on a finished track, verified against the SAM 3.1 masks (jump arcs must clear the object, grinds must follow its edge); writes `features.json` for the showcase only.
-*   `scripts/extract_track.py`: The original track extraction: the smoothed top edge of the track region (`layer_00_mask.npy`).
-*   `scripts/muse_image.py`: Muse Image restyling. Repaints the photo per art style, registers it back onto the photo and scores the fit, then re-cuts the three layers with the original alphas (`styles/`, `styles.json`).
-*   `scripts/showcase.py` + `scripts/showcase_template.html`: Builds the self-contained 3D pipeline showcase page from one run's outputs.
-*   `scripts/render_showcase.py`: Renders the showcase page to MP4 frame by frame (Playwright + ffmpeg).
-*   `scripts/preview_index.py` + `scripts/preview_template.html`: Builds `showcase/preview.html`, the photo picker (track and layers per run, from small WebP copies in `showcase/<name>/preview/`).
-*   `scripts/depth_adapter.py`: Wrapper and integration point for the DA3 model.
-*   `depth_anything_3` (not in this repo): Depth Anything 3, installed into the env as a package.
-*   `Send2Unity/`: Generated Unity-facing outputs for manual runs.
-*   `outputs/`: Generated intermediate outputs.
+*   `scripts/pipeline.py`: the steps above, as a CLI and as `build_level` / `finish_level` for the API.
+*   `scripts/infer.py`: the level API (FastAPI). Each request runs in its own temporary folder.
+*   `scripts/perception.py`, `scripts/depth.py`: step 1; `depth.py` loads Depth Anything 3 once per process.
+*   `scripts/sam31_segmentation.py`: Muse Spark proposes this photo's concepts (skateable + scenery) and a one-line setting; SAM 3.1 segments each concept through the Meta Model API; the masks become one label map, small objects first so handrails keep their own region.
+*   `scripts/muse_spark.py`: shared Muse Spark client (Responses API, JSON-schema output; model `$MUSE_SPARK_MODEL_ID`, default `muse-spark-1.3-contributor`).
+*   `scripts/level_designer.py`: Muse Spark surface choice with mask verification, track repair behind standing objects, occluders (foreground objects in the skater's corridor, also written as Unity's `occluded_segments`), mission, `level_vis.png`.
+*   `scripts/layers.py`, `scripts/track.py`: steps 3 and 4.
+*   `scripts/feature_designer.py`, `scripts/muse_image.py`: steps 5 and 6.
+*   `scripts/showcase.py` + `showcase_template.html`, `scripts/render_showcase.py`: the showcase page and its MP4 renderer.
+*   `scripts/showcase_index.py`, `scripts/preview_index.py` + `preview_template.html`: the gallery and the photo picker.
+*   `scripts/config.py`: reads the tuning environment variables.
 
-## 3. Pipeline Flow & Responsibilities
+## API
 
-### Execution Flow
-1. Windows Server sends `POST /infer` with an image.
-2. `scripts/infer.py` creates an isolated job environment in `_jobs/` with the uploaded image, symlinked scripts/models, and wrapper scripts for path-sensitive steps.
-3. Step 1 runs `scripts/run_inference_depth_sam31.py` in process to generate a 16-bit DA3 depth map and a SAM 3.1 label map.
-4. Step 2 asks Muse Spark (`level_designer.plan_track`) which object is the ground and writes `{base}_track_surfaces.json`; then `scripts/cut_img.py` runs through a wrapper to sort regions by average depth, export foreground/gameplay/background layers, inpaint, and build the track region from the chosen surface (its original geometric selection is the fallback).
-5. Step 3 fills dips where objects stand on the ground (`repair_track_occlusions`), runs the original `scripts/extract_track.py` through a wrapper, then `finalize_level` adds mission, surfaces and occluders to `track_points.json`. The legacy `points` format is unchanged for Unity.
-6. `scripts/infer.py` packages everything into Base64 JSON and responds.
+```bash
+uvicorn scripts.infer:app --host 0.0.0.0 --port 9000      # from wsl-cv/
+curl -X POST http://127.0.0.1:9000/infer -F "photo=@photo.jpg" -F "style=comic" -o level.json
+```
 
-### Known Fragile Points
-*   **Job Orchestration**: `scripts/infer.py` uses isolated job directories, symlinks, and wrapper scripts to override hardcoded paths in path-sensitive legacy scripts. This is sensitive to script changes.
-*   **DA3 Dependency**: Depth Anything 3 is an installed package; any API changes there require updates to `scripts/depth_adapter.py`.
-*   **SAM 3.1 Runtime Dependency**: SAM 3.1 is called at `https://api.meta.ai/v1/responses` with model `sam-3.1`, so the server needs network access and `MODEL_API_KEY`. Setting `SAM31_SKATEABLE_PROMPTS` / `SAM31_SCENERY_PROMPTS` (comma-separated) skips the Muse Spark concept proposal and uses those lists.
-*   **Generated Folders**: Manual runs rely on `outputs/` and `Send2Unity/` folders being created correctly.
+`POST /infer` takes the multipart fields `photo` and, optionally, `style` (`comic`, `cyberpunk`, `snow`, `pixel`, `watercolor`, or `original`; default `$MUSE_IMAGE_STYLE`, else the photo's own pixels). A level takes about 60–80 s. The response:
 
-## 4. API Contract
-
-The Windows server communicates with this module via a `POST` request to `http://<WSL_IP>:9000/infer`, attaching the image as `multipart/form-data` under the key `photo`.
-
-### Current Response Format
 ```json
 {
   "images": {
-    "preview_base64": "iVBORw0KGgo...",
-    "foreground_base64": "...",
-    "gameplay_base64": "...",
-    "background_base64": "..."
+    "preview_base64": "PNG: layers composited, track drawn on top",
+    "foreground_base64": "PNG: near layer, drawn in front of the skater",
+    "gameplay_base64": "PNG: mid layer",
+    "background_base64": "PNG: far layer (opaque)"
   },
   "metadata": {
     "version": "1.0",
-    "timestamp": "2026-04-23T12:00:00.000Z",
-    "source_image": "input.jpg",
-    "aspect_ratio": 1.7778,
-    "track_color": "#9e5752",
-    "points": [ [0.1, 0.5], [0.2, 0.45] ]
+    "timestamp": "2026-11-02T03:58:23.000000Z",
+    "source_image": "photo.jpg",
+    "aspect_ratio": 1.3333,
+    "track_color": "#81786f",
+    "points": [[0.0, 0.7909], [0.0182, 0.7804], "... x, y in 0..1, left to right"],
+    "occluded_segments": [[0, 14]],
+    "level": {
+      "mission": "Shred the desk mat behind the keyboard!",
+      "surfaces": ["desk mat_1"],
+      "occluders": [{"id": "keyboard_2", "label": "keyboard", "x_range": [0.0, 0.2708]}],
+      "render_order": ["background", "gameplay", "track", "foreground"],
+      "generator": "muse-spark-1.3-contributor",
+      "design_notes": "...",
+      "validation": {"passed": true, "attempts": 1, "errors": []}
+    },
+    "art_style": {"name": "comic", "label": "Comic", "model": "muse-image", "edge_f1": 0.64}
   }
 }
 ```
 
-### Intended Future `LevelPayload` Format
-*Note: The current response keeps Unity-compatible `metadata.points` arrays instead of moving track data under this intended future `track` block.*
-```json
-{
-  "status": "ok",
-  "images": {
-    "preview_base64": "...",
-    "foreground_base64": "...",
-    "gameplay_base64": "...",
-    "background_base64": "..."
-  },
-  "track": {
-    "points": [ {"x": 0.1, "y": 0.8} ],
-    "terrain_type": "road",
-    "friction": 0.8
-  },
-  "metadata": {
-    "source_width": 1024,
-    "source_height": 768
-  }
-}
-```
-**Mismatches to resolve in the future:**
-1. Adding a WSL `status` field if direct clients need it.
-2. Changing `points` from `[x, y]` arrays to `{"x": x, "y": y}` objects under a `track` block.
-3. Adding `terrain_type` and `friction`.
-4. Using `source_width`/`source_height` instead of `aspect_ratio`/`timestamp`.
+`art_style` is present only for a restyled level. `GET /health` answers `{"status": "ok"}`.
 
-## 5. TODOs
-*   **Model Checkpoints:** Clarify if `DepthAnything3.from_pretrained` downloads the model automatically to a cache directory on first run, or if manual placement of weights is required in a disconnected environment. Currently, it assumes the model is downloadable or cached via Hugging Face Hub.
+## Configuration
+
+| Variable | Default | |
+|---|---|---|
+| `MODEL_API_KEY` | (required) | Meta Model API key |
+| `MUSE_IMAGE_STYLES` / `MUSE_IMAGE_STYLE` | all / none | styles for `pipeline.py` / the API |
+| `MUSE_SPARK_MAX_ATTEMPTS` | 3 | verify-and-repair rounds for the surface and the tricks |
+| `DA3_MODEL_NAME`, `DA3_INPUT_SIZE` | `depth-anything/da3-small`, 768 | depth model and its resolution |
+| `PIPELINE_OUTPUT_WIDTH`, `PIPELINE_INFERENCE_WIDTH` | 1024, 768 | working width of the level / of the models' input |
+| `LEVEL_SKATER_HEIGHT` | 0.15 | skater height (fraction of the photo) used for occluders and tricks |
+
+Depth Anything 3 weights download from Hugging Face on first use and are cached there.

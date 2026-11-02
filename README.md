@@ -6,7 +6,7 @@ SkateP is an exploration of 2.5D: how much of the real world's depth can a singl
 
 To make that space playable, SkateP finds what you can ride on, draws a line across it, places jumps and grinds, and repaints the level in an art style of your choice. The level loads straight into a Unity skateboarding game on your phone.
 
-![A generated level in the cyberpunk style: the skater rides a street, passing behind a bus and a car](docs/images/ride.jpg)
+![The SkateP showcase: a desk photo restyled as a comic, with the track, a Muse Spark jump over the mug, and the skater passing behind the headset](docs/images/ride.jpg)
 
 Built solo by **Ryder Wu** for the **Meta Global AI Developer Hackathon (2026)**, with SAM 3.1, Muse Spark and Muse Image through the Meta Model API.
 
@@ -43,17 +43,19 @@ All three are called through the Meta Model API. Depth comes from [Depth Anythin
 
 ## Built during the hackathon
 
-SkateP started from an existing prototype: a Unity skate game plus a backend that cut a photo into layers with DA3 depth and SAM 2. That baseline is commit [`e5c732f`](https://github.com/ryder1018/skateboard-META/commit/e5c732f). Everything after it was built during the hackathon:
+All code in this repository was written during the hackathon, with one exception: `unity_client/MobileCameraCapture.cs`, the photo capture and upload script of my existing Unity skateboarding game, which I extended during the event (map style picker, mission display, level metadata). The game itself is not in this repository.
 
-| Area | New in the hackathon | Existing before |
-|---|---|---|
-| Segmentation | SAM 3.1 via the Meta Model API, with Muse Spark choosing the concepts per photo | SAM 2 automatic masks (no labels) |
-| Level design | Muse Spark surface choice, mission and occluders (`level_designer.py`), all verified against the masks | Geometric track pick |
-| Tricks | Muse Spark jumps and grinds with geometric verification (`feature_designer.py`) | — |
-| Art | Muse Image styles and background fill, registered to the photo (`muse_image.py`) | OpenCV inpainting |
-| Showcase | 3D replay of the whole pipeline, MP4 renderer, gallery and photo picker (`showcase*.py`, `preview_*`) | — |
-| Unity | Map style picker, mission display, level metadata, Editor smoke test (`ArtStyleSelector.cs`, `TrackModels.cs`, `Editor/`) | Capture/upload client, the game itself |
-| Depth, track extraction, gateway | Small fixes only | Depth Anything 3 adapter, `extract_track.py`, `win-server/` |
+SkateP grew out of an earlier prototype of mine that cut a photo into layers with Depth Anything 3 and SAM 2's unlabeled masks. Its code is the repository's first commit ([`e5c732f`](https://github.com/ryder1018/skateboard-META/commit/e5c732f)) and has since been replaced file by file; two of its ideas live on in new code, depth-sorted layers (`layers.py`) and a smoothed top-edge track (`track.py`).
+
+| Built during the hackathon | |
+|---|---|
+| Perception | Muse Spark chooses what to segment per photo; SAM 3.1 segments it through the Meta Model API while DA3 runs locally (`perception.py`, `sam31_segmentation.py`, `depth.py`) |
+| Level design | Muse Spark surface choice, mission and occluders, each verified against the masks (`level_designer.py`); layers and track (`layers.py`, `track.py`) |
+| Tricks | Muse Spark jumps and grinds with geometric verification (`feature_designer.py`) |
+| Art | Muse Image styles and background fill, registered to the photo (`muse_image.py`) |
+| Showcase | 3D replay of the whole pipeline, MP4 renderer, gallery and photo picker (`showcase*.py`, `preview_*`) |
+| Serving | Level API and Windows gateway (`infer.py`, `win-server/`) |
+| Unity | Map style picker, level data models, Editor smoke test (`ArtStyleSelector.cs`, `TrackModels.cs`, `Editor/`) |
 
 ## Getting started
 
@@ -78,8 +80,8 @@ pip install -e ../Depth-Anything-3
 
 pip install -r wsl-cv/requirements.txt
 
-# Optional: showcase MP4 rendering
-pip install playwright && python -m playwright install chromium
+# Optional: the browser that renders showcase MP4s
+python -m playwright install chromium
 ```
 
 Put your API key in a `.env` file at the repository root (it is git-ignored):

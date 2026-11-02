@@ -1,157 +1,137 @@
-import os
+"""SkateP pipeline: one photo in, a playable 2.5D level (and its showcase) out.
+
+  1. perception.py       DA3 depth + SAM 3.1 objects (Muse Spark picks the concepts)
+  2. level_designer.py   Muse Spark picks the riding surface, verified against the masks
+  3. layers.py           near / mid / far layers by depth, plus the ground mask
+  4. track.py            the line along the ground's top edge; level_designer adds
+                         the occluders and the mission
+  5. feature_designer.py Muse Spark jumps and grinds (showcase only)
+  6. muse_image.py       art styles and the background behind the front layers
+  7. showcase.py         the self-contained 3D replay page
+
+--preview stops after step 4; --resume starts at step 5 from an earlier preview.
+
+Usage:
+    python scripts/pipeline.py <photo> --out_dir <dir> --send2unity_dir <dir> [--styles comic,snow] [--preview | --resume]
+"""
+
 import argparse
-from run_inference_depth_sam31 import run_inference
-from cut_img import process_cut_img
-from extract_track import extract_smooth_track
-from level_designer import finalize_level, plan_track, repair_track_occlusions, surfaces_path_for
+import os
+from collections.abc import Callable
+
 from feature_designer import design_tricks
+from layers import cut_layers
+from level_designer import finalize_level, plan_track, repair_track_occlusions
 from muse_image import front_objects, load_setting, parse_styles, styles_from_env, stylize_run
+from perception import analyze_photo, output_paths
 from showcase import build_showcase
+from track import trace_track
+
+
+def _step(number: str, title: str) -> None:
+    print(f"\n── Step {number}: {title} " + "─" * max(4, 60 - len(title)))
+
+
+def build_level(
+    image_path: str,
+    out_dir: str,
+    level_dir: str,
+    after_layers: Callable[[], None] | None = None,
+) -> dict:
+    """Steps 1-4. Writes the Unity level into level_dir; returns track_points.json's content.
+
+    after_layers runs once the layers exist, before tracing (the API starts
+    its background fill there).
+    """
+    os.makedirs(level_dir, exist_ok=True)
+
+    _step("1", "Depth + objects (DA3, Muse Spark, SAM 3.1)")
+    paths = analyze_photo(image_path, out_dir)
+
+    _step("2", "Riding surface (Muse Spark)")
+    try:
+        plan = plan_track(image_path, paths["labels"], paths["objects"])
+    except Exception as exc:
+        print(f"  ! Muse Spark surface choice failed ({exc}); falling back to the geometric guess.")
+        plan = None
+
+    _step("3", "2.5D layers")
+    cut_layers(image_path, paths["depth"], paths["labels"], level_dir, plan["label_ids"] if plan else None)
+    if after_layers is not None:
+        after_layers()
+
+    _step("4", "Track + level")
+    ground_path = os.path.join(level_dir, "layer_00_mask.npy")
+    repair_track_occlusions(ground_path, paths["labels"])
+    trace_track(ground_path, os.path.join(level_dir, "track_points.json"), image_path)
+    return finalize_level(image_path, paths["labels"], paths["objects"], level_dir, plan)
+
+
+def finish_level(image_path: str, out_dir: str, level_dir: str, styles: list[str] | None = None) -> None:
+    """Steps 5-7: tricks, Muse Image art, the 3D showcase."""
+    objects_path = output_paths(image_path, out_dir)["objects"]
+
+    _step("5", "Tricks (Muse Spark, showcase only)")
+    features_path = os.path.join(level_dir, "features.json")
+    if os.path.exists(features_path):
+        os.remove(features_path)
+    try:
+        design_tricks(image_path, out_dir, level_dir)
+    except Exception as exc:
+        print(f"  ! Muse Spark trick design failed ({exc}); the showcase rides without tricks.")
+
+    styles = styles_from_env() if styles is None else styles
+    _step("6", f"Art (Muse Image: {', '.join(styles) or 'background only'})")
+    try:
+        stylize_run(
+            image_path,
+            level_dir,
+            styles,
+            photo_background=True,
+            setting=load_setting(objects_path),
+            removed=front_objects(level_dir, objects_path),
+        )
+    except Exception as exc:
+        print(f"  ! Muse Image failed ({exc}); the level keeps the photo's art and inpainted background.")
+
+    _step("7", "3D showcase")
+    build_showcase(image_path, out_dir, level_dir, os.path.join(level_dir, "showcase.html"))
+
 
 def run_pipeline(
     image_path: str,
     out_dir: str = "./outputs/inference_results",
-    send2unity_dir: str = "./Send2Unity",
+    level_dir: str = "./Send2Unity",
     styles: list[str] | None = None,
     preview: bool = False,
     resume: bool = False,
-):
-    """Run every step. preview stops once the track and layers exist (no
-    tricks, Muse Image or showcase); resume starts after them, keeping a
-    previewed track instead of segmenting the photo again."""
+) -> None:
     if not os.path.exists(image_path):
-        print(f"Error: File not found at {image_path}")
-        return
-
-    os.makedirs(out_dir, exist_ok=True)
-    os.makedirs(send2unity_dir, exist_ok=True)
-
-    if resume and os.path.exists(os.path.join(send2unity_dir, "track_points.json")):
+        raise FileNotFoundError(image_path)
+    if resume and os.path.exists(os.path.join(level_dir, "track_points.json")):
         print("Resuming from the existing track and layers.")
-    elif not build_level(image_path, out_dir, send2unity_dir):
-        return
+    else:
+        build_level(image_path, out_dir, level_dir)
     if preview:
-        print(f"\nPreview ready (track + layers) in {send2unity_dir}")
+        print(f"\nPreview ready (track + layers) in {level_dir}")
         return
-    finish_level(image_path, out_dir, send2unity_dir, styles)
+    finish_level(image_path, out_dir, level_dir, styles)
+    print(f"\nDone. Level and showcase are in {level_dir}")
 
-
-def build_level(image_path: str, out_dir: str, send2unity_dir: str) -> bool:
-    """Steps 1-4: DA3 + SAM 3.1, Muse Spark surface, layers, track."""
-    base_name = os.path.splitext(os.path.basename(image_path))[0]
-
-    print(f"\n=============================================")
-    print(f"--- Step 1: Running Inference for {image_path} ---")
-    print(f"=============================================")
-    run_inference(image_path, out_dir=out_dir)
-    
-    # run_inference_depth_sam31 saves DA3 depth and the SAM 3.1 label map:
-    # {base_name}_depth_16bit.png and {base_name}_depth_mask.npy
-    depth16_path = os.path.join(out_dir, f"{base_name}_depth_16bit.png")
-    mask_path = os.path.join(out_dir, f"{base_name}_depth_mask.npy")
-    
-    if not os.path.exists(depth16_path) or not os.path.exists(mask_path):
-        print("Error: Step 1 failed to produce expected outputs.")
-        return False
-
-    print(f"\n=============================================")
-    print(f"--- Step 2: Choosing Track Surface (Muse Spark) ---")
-    print(f"=============================================")
-    objects_path = os.path.join(out_dir, f"{base_name}_sam31_objects.json")
-    if os.path.exists(surfaces_path_for(mask_path)):
-        os.remove(surfaces_path_for(mask_path))
-    try:
-        plan = plan_track(image_path, mask_path, objects_path)
-    except Exception as exc:
-        print(f"Muse Spark surface choice failed ({exc}); using the geometric track selection.")
-        plan = None
-
-    print(f"\n=============================================")
-    print(f"--- Step 3: Cutting Image ---")
-    print(f"=============================================")
-    process_cut_img(image_path, depth16_path, mask_path, out_dir=send2unity_dir)
-    
-    # process_cut_img saves layer_00_mask.npy
-    layer_00_mask_path = os.path.join(send2unity_dir, "layer_00_mask.npy")
-    out_json = os.path.join(send2unity_dir, "track_points.json")
-    
-    if not os.path.exists(layer_00_mask_path):
-        print("Error: Step 3 failed to produce layer_00_mask.npy.")
-        return False
-
-    print(f"\n=============================================")
-    print(f"--- Step 4: Extracting Track ---")
-    print(f"=============================================")
-    repair_track_occlusions(layer_00_mask_path, mask_path)
-    extract_smooth_track(
-        layer_00_mask_path,
-        out_json,
-        rgb_image_path=image_path,
-        source_img_name=os.path.basename(image_path),
-        smooth_sigma=18.0,
-        epsilon=18.0,
-        alpha=0.75,
-        sample_interval=18.0,
-        clip_smooth_sigma=1.5,
-        clip_top_margin_px=80.0,
-    )
-    finalize_level(image_path, mask_path, objects_path, send2unity_dir, plan)
-    return True
-
-
-def finish_level(image_path: str, out_dir: str, send2unity_dir: str, styles: list[str] | None) -> None:
-    """Steps 4b-6: tricks, Muse Image art, 3D showcase."""
-    base_name = os.path.splitext(os.path.basename(image_path))[0]
-    objects_path = os.path.join(out_dir, f"{base_name}_sam31_objects.json")
-
-    print(f"\n=============================================")
-    print(f"--- Step 4b: Placing Tricks (Muse Spark, showcase only) ---")
-    print(f"=============================================")
-    features_path = os.path.join(send2unity_dir, "features.json")
-    if os.path.exists(features_path):
-        os.remove(features_path)
-    try:
-        design_tricks(image_path, out_dir, send2unity_dir)
-    except Exception as exc:
-        print(f"Muse Spark trick design failed ({exc}); the showcase rides without tricks.")
-
-    styles = styles_from_env() if styles is None else styles
-    print(f"\n=============================================")
-    print(f"--- Step 5: Background Fill + Art Styles (Muse Image: {', '.join(styles) or 'background only'}) ---")
-    print(f"=============================================")
-    try:
-        stylize_run(
-            image_path,
-            send2unity_dir,
-            styles,
-            photo_background=True,
-            setting=load_setting(objects_path),
-            removed=front_objects(send2unity_dir, objects_path),
-        )
-    except Exception as exc:
-        print(f"Muse Image failed ({exc}); the level keeps the photo's art and inpainted background.")
-
-    print(f"\n=============================================")
-    print(f"--- Step 6: Building 3D Showcase ---")
-    print(f"=============================================")
-    build_showcase(image_path, out_dir, send2unity_dir, os.path.join(send2unity_dir, "showcase.html"))
-
-    print(f"\nPipeline completed successfully! Unity outputs are in {send2unity_dir}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the full SkateP CV pipeline on an image.")
-    parser.add_argument("image_path", help="Path to the input image")
-    parser.add_argument("--out_dir", default="./outputs/inference_results", help="Directory for intermediate inference outputs")
-    parser.add_argument("--send2unity_dir", default="./Send2Unity", help="Directory for final Unity outputs")
+    parser = argparse.ArgumentParser(description="Turn one photo into a SkateP level and its 3D showcase.")
+    parser.add_argument("image_path", help="The photo (resized in place to the working width)")
+    parser.add_argument("--out_dir", default="./outputs/inference_results", help="Depth, label map and object list")
+    parser.add_argument("--send2unity_dir", default="./Send2Unity", help="The level: layers, track, styles, showcase")
     parser.add_argument("--styles", default=None, help="Muse Image styles: comma-separated, 'all' or 'none' (default: $MUSE_IMAGE_STYLES or all)")
-    parser.add_argument("--preview", action="store_true", help="Stop after the track and layers (Steps 1-4)")
-    parser.add_argument("--resume", action="store_true", help="Reuse an existing track and layers; run Steps 4b-6 only")
+    parser.add_argument("--preview", action="store_true", help="Stop after the track and layers (steps 1-4)")
+    parser.add_argument("--resume", action="store_true", help="Reuse an existing track and layers; run steps 5-7 only")
     args = parser.parse_args()
-    
     run_pipeline(
         args.image_path,
         out_dir=args.out_dir,
-        send2unity_dir=args.send2unity_dir,
+        level_dir=args.send2unity_dir,
         styles=parse_styles(args.styles) if args.styles is not None else None,
         preview=args.preview,
         resume=args.resume,

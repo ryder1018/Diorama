@@ -9,6 +9,8 @@ import cv2
 import numpy as np
 import requests
 
+from config import env_list, env_number
+
 SAM31_API_URL = "https://api.meta.ai/v1/responses"
 SAM31_MODEL_ID = "sam-3.1"
 
@@ -80,31 +82,10 @@ SETTING_SCHEMA = {
 }
 
 
-def _get_float_env(name: str, default: float) -> float:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except ValueError:
-        return default
 
 
-def _get_int_env(name: str, default: int) -> int:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        return int(value)
-    except ValueError:
-        return default
 
 
-def _get_prompts_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return tuple(prompt.strip() for prompt in value.split(",") if prompt.strip())
 
 
 def _image_data_url(image_bgr: np.ndarray) -> str:
@@ -139,7 +120,7 @@ def _stream_output_text(api_key: str, prompt: str, image_url: str) -> str:
             "stream": True,
         },
         stream=True,
-        timeout=_get_float_env("SAM31_TIMEOUT", 120.0),
+        timeout=env_number("SAM31_TIMEOUT", 120.0),
     )
     if response.status_code != 200:
         raise RuntimeError(
@@ -232,7 +213,7 @@ def segment_concepts(image_bgr: np.ndarray, prompts: tuple[str, ...]) -> dict[st
     def run(prompt: str) -> list[dict[str, Any]]:
         return _parse_instances(_stream_output_text(api_key, prompt, image_url), height, width)
 
-    max_workers = max(1, min(len(prompts), _get_int_env("SAM31_MAX_WORKERS", 4)))
+    max_workers = max(1, min(len(prompts), env_number("SAM31_MAX_WORKERS", 4)))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         return dict(zip(prompts, pool.map(run, prompts)))
 
@@ -270,8 +251,8 @@ def propose_concepts(image_bgr: np.ndarray) -> tuple[tuple[str, ...], tuple[str,
     )
     proposal = json.loads(raw_text)
     taken: set[str] = set()
-    skateable = _clean_concepts(proposal["skateable"], _get_int_env("SAM31_MAX_SKATEABLE_CONCEPTS", 8), taken)
-    scenery = _clean_concepts(proposal["scenery"], _get_int_env("SAM31_MAX_SCENERY_CONCEPTS", 6), taken)
+    skateable = _clean_concepts(proposal["skateable"], env_number("SAM31_MAX_SKATEABLE_CONCEPTS", 8), taken)
+    scenery = _clean_concepts(proposal["scenery"], env_number("SAM31_MAX_SCENERY_CONCEPTS", 6), taken)
     if not skateable:
         raise RuntimeError("Muse Spark proposed no skateable concepts.")
     fixed = [" ".join(p.lower().split()) for p in proposal["fixed"]]
@@ -323,8 +304,8 @@ def _resolve_prompts(
     if os.getenv("SAM31_SKATEABLE_PROMPTS") is not None:
         print("  ✔ Using SAM 3.1 concepts from SAM31_SKATEABLE_PROMPTS / SAM31_SCENERY_PROMPTS")
         return (
-            _get_prompts_env("SAM31_SKATEABLE_PROMPTS", SKATEABLE_PROMPTS),
-            _get_prompts_env("SAM31_SCENERY_PROMPTS", SCENERY_PROMPTS),
+            env_list("SAM31_SKATEABLE_PROMPTS", SKATEABLE_PROMPTS),
+            env_list("SAM31_SCENERY_PROMPTS", SCENERY_PROMPTS),
             "env",
             None,
             None,
@@ -345,12 +326,12 @@ def _resolve_prompts(
 def generate_sam31_label_map(
     image_bgr: np.ndarray,
 ) -> tuple[np.ndarray, int, list[dict[str, Any]], dict[str, Any]]:
-    """Generate a non-overlapping label map from SAM 3.1 text-prompted masks.
+    """Segment the photo into named SAM 3.1 regions, one region per pixel.
 
-    The returned label map uses 0 for uncovered pixels and 1..N for accepted
-    SAM 3.1 instances. Downstream layer export sorts these regions by DA3 depth.
-    The object list keeps each instance's concept, box and label id so later
-    stages know "this is a handrail", not just "this is a region".
+    Returns (labels, region count, objects, info). labels holds 0 where no
+    object was found and the object's label_id elsewhere; every object keeps
+    its concept, box and id, so later steps know "this is a handrail", not
+    just "region 7". info has the concepts Muse Spark chose and the timings.
     """
     if image_bgr is None:
         raise ValueError("image_bgr is required")
@@ -364,8 +345,8 @@ def generate_sam31_label_map(
     sam_seconds = time.perf_counter() - started
 
     height, width = image_bgr.shape[:2]
-    min_area = int(height * width * _get_float_env("SAM31_MIN_AREA_RATIO", 0.001))
-    min_score = _get_float_env("SAM31_MIN_CONFIDENCE", 0.3)
+    min_area = int(height * width * env_number("SAM31_MIN_AREA_RATIO", 0.001))
+    min_score = env_number("SAM31_MIN_CONFIDENCE", 0.3)
 
     objects: list[dict[str, Any]] = []
     for prompt in prompts:
@@ -392,28 +373,25 @@ def generate_sam31_label_map(
     objects.sort(key=lambda obj: obj["area"])
 
     labels = np.zeros((height, width), dtype=np.int32)
-    occupied = np.zeros((height, width), dtype=bool)
-    next_label = 1
-    counts: dict[str, int] = {}
-
+    regions = 0
+    per_concept: dict[str, int] = {}
     for obj in objects:
-        counts[obj["label"]] = counts.get(obj["label"], 0) + 1
-        obj["id"] = f"{obj['label']}_{counts[obj['label']]}"
-        new_pixels = obj.pop("mask") & ~occupied
-        obj["label_id"] = None
-        if int(new_pixels.sum()) < min_area:
+        n = per_concept[obj["label"]] = per_concept.get(obj["label"], 0) + 1
+        obj["id"] = f"{obj['label']}_{n}"
+        # An object keeps only the pixels no smaller object claimed first; if
+        # too little is left, it stays in the list without a region.
+        unclaimed = obj.pop("mask") & (labels == 0)
+        if unclaimed.sum() < min_area:
+            obj["label_id"] = None
             continue
+        regions += 1
+        labels[unclaimed] = obj["label_id"] = regions
 
-        labels[new_pixels] = next_label
-        occupied[new_pixels] = True
-        obj["label_id"] = next_label
-        next_label += 1
-
-    if next_label == 1:
+    if regions == 0:
         raise RuntimeError("SAM 3.1 found no usable objects for the configured prompts.")
 
     info = {
         "concepts": {"skateable": list(skateable), "scenery": list(scenery), "source": source, "setting": setting, "fixed": fixed},
         "timings": {"concepts": round(concepts_seconds, 2), "sam31": round(sam_seconds, 2)},
     }
-    return labels, next_label - 1, objects, info
+    return labels, regions, objects, info
