@@ -182,7 +182,8 @@ def depth_image(labels: np.ndarray, distances: dict[int, float], ground_ids: set
     # The ground slopes away: nearest at the photo's bottom edge, as far as the
     # farthest object standing on it at its top edge.
     near = np.log1p(min(distances.values()))
-    far = np.log1p(max([distances[r] for r in contacts if r in distances] + [distances.get(r, 1.0) for r in ground_ids]))
+    # No ground (the surface choice fell back): nothing slopes, so far is unused.
+    far = np.log1p(max([distances[r] for r in contacts if r in distances] + [distances.get(r, 1.0) for r in ground_ids], default=min(distances.values())))
     rows = np.arange(height, dtype=np.float32)[:, None]
     for region in ground_ids:
         mask = labels == region
