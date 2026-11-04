@@ -119,10 +119,10 @@ echo "MODEL_API_KEY=<your Meta Model API key>" > .env
 
 ```bash
 cd wsl-cv
-./try_photo.sh assets/pictures/cup.jpg
+./try_photo.sh assets/pictures/cup.jpg my_cup     # or any photo of your own
 ```
 
-This runs the full pipeline (2–4 minutes) and writes `showcase/cup/`: the Unity layers and `track_points.json`, plus `showcase.html`, a self-contained 3D replay of every step that ends with the skater riding the level. Press **F** in the ride to toggle whether foreground objects fade or fully hide the skater.
+This runs the full pipeline (2–4 minutes) and writes `showcase/my_cup/` (a new name, so the committed `cup` sample stays as it is): the Unity layers and `track_points.json`, plus `showcase.html`, a self-contained 3D replay of every step that ends with the skater riding the level. Press **F** in the ride to toggle whether foreground objects fade or fully hide the skater.
 
 ### Batch mode and the photo picker
 
@@ -169,6 +169,7 @@ The Unity game project itself is not in this repository; `unity_client/` holds t
 ## Credits
 
 - [three.js](https://threejs.org/) (MIT) for the 3D showcase, loaded from a CDN.
+- [Space Grotesk](https://fonts.google.com/specimen/Space+Grotesk) and [JetBrains Mono](https://fonts.google.com/specimen/JetBrains+Mono) (SIL Open Font License) for the showcase pages, loaded from Google Fonts.
 - All sample photos are my own. The skater and the soundtrack in the showcase are generated in code, with no external assets.
 
 ## License

@@ -72,7 +72,12 @@ def build_level(photo: bytes, filename: str, content_type: str, style: str | Non
         job.set({"status": "error", "message": f"Level API error {response.status_code}: {response.text[:500]}"})
         print(f"✗ HTTP {response.status_code}")
         return
-    level = response.json()
+    try:
+        level = response.json()
+    except ValueError:
+        job.set({"status": "error", "message": "Level API returned an unreadable response"})
+        print("✗ response is not JSON")
+        return
     job.set({"status": "success", "images": level.get("images", {}), "metadata": level.get("metadata", {})})
     print("✓ level ready")
 

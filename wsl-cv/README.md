@@ -1,6 +1,6 @@
 # Diorama backend (`wsl-cv/`)
 
-The verified 2.5D scene pipeline: turns one photo into depth-sorted layers, a ground line, the objects that hide a character on it, verified jumps and grinds and Muse Image art styles, then plays the scene as a skate level and replays the whole run in a 3D showcase. Every model call goes to Meta's models through the Meta Model API, so it needs no GPU; installation is in the root [`README.md`](../README.md#installation). Set `MODEL_API_KEY` (or put it in the repo-root `.env`, which the scripts load).
+The verified 2.5D scene pipeline: turns one photo into depth-sorted layers, a ground line, the objects that hide a character on it, verified jumps and grinds and Muse Image art styles, then plays the scene as a skate level and replays the whole run in a 3D showcase. Every model call goes to Meta's models through the Meta Model API, so it needs no GPU; installation is in the root [`README.md`](../README.md#installation). Set `MODEL_API_KEY` (or put it in the repo-root `.env`, which `try_photo.sh` and `run_photos.sh` load; for `uvicorn` or the Python scripts, export it first: `set -a; . ../.env; set +a`).
 
 ## Pipeline
 
@@ -52,7 +52,7 @@ After the track exists, `scripts/feature_designer.py` asks Muse Spark where a sk
 - **grind**: the object must be skateable and its top edge must follow the track (within `TRICK_EDGE_TOLERANCE`, 3.5 % of the height) along at least 60 % of the span; the feedback names where the edge actually meets the track.
 - Tricks may not overlap.
 
-Violations go back to Muse Spark for repair (up to `MUSE_SPARK_MAX_ATTEMPTS`); tricks that still fail are dropped. When no object meets the track, Muse Spark is not called. The result is `<send2unity_dir>/features.json` (tricks, a mission that names them, every attempt); `track_points.json` and the `/infer` response for Unity are unchanged. `pipeline.py` runs it as step 6; `./run_photos.sh --tricks` (re)runs it on every built showcase and rebuilds the pages. On the 7 sample levels it placed a jump on one (over a computer mouse), two grinds on another (a utility box and a sidewalk edge) and nothing on five (rooms, plazas and streets where only furniture, buildings, trees, vehicles or people meet the line).
+Violations go back to Muse Spark for repair (up to `MUSE_SPARK_MAX_ATTEMPTS`); tricks that still fail are dropped. When no object meets the track, Muse Spark is not called. The result is `<send2unity_dir>/features.json` (tricks, a mission that names them, every attempt); `track_points.json` and the `/infer` response for Unity are unchanged. `pipeline.py` runs it as step 6; `./run_photos.sh --tricks` (re)runs it on every built showcase and rebuilds the pages. On the 8 sample levels it placed tricks on three (a jump over a computer mouse; two grinds on a utility box and a sidewalk edge; two keyboard grinds around a water-bottle jump) and nothing on five (rooms, plazas and streets where only furniture, buildings, trees, vehicles or people meet the line).
 
 ```bash
 python scripts/feature_designer.py <image> <inference_dir> <send2unity_dir>
